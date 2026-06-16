@@ -1,0 +1,126 @@
+import type { ModelPricing } from './types'
+
+const pricingSource =
+  'https://azure.microsoft.com/en-us/pricing/details/azure-openai/'
+
+export const AZURE_DATA_ZONE_MODELS: ModelPricing[] = [
+  {
+    id: 'gpt-5.5-data-zone',
+    name: 'GPT-5.5 Data Zone',
+    inputCostPerMillion: 5.5,
+    outputCostPerMillion: 33,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-5.4-data-zone',
+    name: 'GPT-5.4 (<272k context length) Data Zone',
+    inputCostPerMillion: 2.75,
+    outputCostPerMillion: 16.5,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-5.2-data-zone',
+    name: 'GPT-5.2 Data Zone',
+    inputCostPerMillion: 1.925,
+    outputCostPerMillion: 15.4,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-5.2-chat-data-zone',
+    name: 'GPT-5.2-chat Data Zone',
+    inputCostPerMillion: 1.925,
+    outputCostPerMillion: 15.4,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-5.1-data-zone',
+    name: 'GPT-5.1 Data Zone',
+    inputCostPerMillion: 1.375,
+    outputCostPerMillion: 11,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-5-data-zone',
+    name: 'GPT-5 Data Zone',
+    inputCostPerMillion: 1.375,
+    outputCostPerMillion: 11,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-5-mini-data-zone',
+    name: 'GPT-5-mini Data Zone',
+    inputCostPerMillion: 0.275,
+    outputCostPerMillion: 2.2,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-5-nano-data-zone',
+    name: 'GPT-5-nano Data Zone',
+    inputCostPerMillion: 0.055,
+    outputCostPerMillion: 0.44,
+    source: pricingSource,
+  },
+  {
+    id: 'o3-2025-04-16-data-zone',
+    name: 'o3 2025-04-16 Data Zone',
+    inputCostPerMillion: 2.2,
+    outputCostPerMillion: 8.8,
+    source: pricingSource,
+  },
+  {
+    id: 'o4-mini-2025-04-16-data-zone',
+    name: 'o4-mini 2025-04-16 Data Zone',
+    inputCostPerMillion: 1.21,
+    outputCostPerMillion: 4.84,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-4.1-data-zone',
+    name: 'GPT-4.1-2025-04-14 Data Zone',
+    inputCostPerMillion: 2.2,
+    outputCostPerMillion: 8.8,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-4.1-mini-data-zone',
+    name: 'GPT-4.1-mini-2025-04-14 Data Zone',
+    inputCostPerMillion: 0.44,
+    outputCostPerMillion: 1.76,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-4.1-nano-data-zone',
+    name: 'GPT-4.1-nano-2025-04-14 Data Zone',
+    inputCostPerMillion: 0.11,
+    outputCostPerMillion: 0.44,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-4o-2024-1120-data-zones',
+    name: 'GPT-4o-2024-1120 US/EU – Data Zones',
+    inputCostPerMillion: 2.75,
+    outputCostPerMillion: 11,
+    source: pricingSource,
+  },
+  {
+    id: 'gpt-4o-mini-0718-data-zones',
+    name: 'GPT-4o-mini-0718 US/EU – Data Zones',
+    inputCostPerMillion: 0.165,
+    outputCostPerMillion: 0.66,
+    source: pricingSource,
+  },
+  {
+    id: 'o1-2024-12-17-data-zones',
+    name: 'o1 2024-12-17 US/EU – Data Zones',
+    inputCostPerMillion: 16.5,
+    outputCostPerMillion: 66,
+    source: pricingSource,
+  },
+  {
+    id: 'o3-mini-2025-01-31-data-zones',
+    name: 'o3 mini 2025-01-31-US/EU – Data Zones',
+    inputCostPerMillion: 1.21,
+    outputCostPerMillion: 4.84,
+    source: pricingSource,
+  },
+]

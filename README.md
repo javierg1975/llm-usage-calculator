@@ -56,11 +56,12 @@ Open the URL shown in the terminal (typically `http://localhost:5173`).
 You don't need your own logs to explore the app. The [`samples/`](./samples) directory
 holds ready-made files for a customer-support assistant.
 
-1. In the app, expand a conversation flow and open the **Token Estimation Samples** tab.
-2. Under each field, use the file picker to load the matching file from `samples/`
+1. In the app, expand a conversation flow. Each workflow stage (trigger → gate → answer →
+   judge) is its own block with its rate knob and sample fields inline.
+2. In each block, use the file picker to load the matching file from `samples/`
    (see [`samples/README.md`](./samples/README.md) for the field-to-file mapping).
-3. Click **Estimate workflow** — the per-conversation token averages and the live cost
-   estimate update from your samples.
+3. Click **Estimate workflow** — the per-conversation token averages update from your
+   samples. The rate knobs then scale the live cost estimate instantly as you move them.
 
 <p align="center">
   <img src="docs/img/samples-grid.png" alt="Token estimation samples with parsed token counts" width="760">
@@ -107,6 +108,12 @@ trigger → gate (engage?) → answer ⇄ judge (retry until pass or max attempt
 - Expected **input** tokens per conversation sum the prompt + message tokens across the
   expected number of gate, answer, and judge calls; expected **output** tokens sum the
   generated decisions and answers.
+- A global **API reliability** factor accounts for transport-level call failures
+  (timeouts, 5xx, rate limits) that are transparently retried. Modeled as a
+  truncated-geometric overhead `(1 − (1 − successRate)^maxAttempts) / successRate` and
+  applied to **input tokens only** — a failed call rarely bills for output. The default
+  (99% success / 3 attempts ≈ 1.01×) is a rounding-error nudge; raise it for flaky infra,
+  or set success to 100% to disable.
 - `calculator.ts` then scales per-user tokens across an **engagement distribution**
   (light/standard/heavy/power users with per-segment multipliers and largest-remainder
   user allocation) and applies per-million input/output pricing to produce the annual
@@ -121,6 +128,11 @@ trigger → gate (engage?) → answer ⇄ judge (retry until pass or max attempt
 - **Cached-input pricing is excluded.** The shared user message is counted as fresh input
   on every answer and judge call, so input tokens are an **upper bound** — real spend can
   be lower when prompt caching applies.
+- **Prompt samples are the template only.** In production the user message is interpolated
+  *into* each prompt before the call; the estimator instead counts the prompt scaffolding
+  and the message separately and sums them (≈ the same total, and a conservative upper
+  bound). So paste only the prompt scaffolding into the gate/answer/judge prompt fields —
+  if you include the user message or draft answer there, it gets double-counted.
 - Token **averages** from your samples are treated as representative of all traffic.
 - Prices are static values in `src/lib/models.ts` (Azure Data Zone list prices); verify
   against the [official Azure pricing page](https://azure.microsoft.com/en-us/pricing/details/azure-openai/)

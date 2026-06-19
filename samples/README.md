@@ -1,31 +1,33 @@
 # Demo sample files
 
-These files let you try the **Token Estimation Samples** tab without pasting your own
-logs. They model a customer-support assistant whose conversation runs
+These files let you try the workflow stage blocks without pasting your own logs. They
+model a customer-support assistant whose conversation runs
 `trigger → gate → answer → judge (with retries)`.
 
-In the app, expand a conversation flow, open the **Token Estimation Samples** tab, and
-use the file picker under each field to load the matching file. Then click
-**Estimate workflow** to turn the samples into per-conversation token averages.
+In the app, expand a conversation flow. Each stage is its own block with its sample
+fields inline — use the file picker in the matching block to load each file. Then click
+**Estimate workflow** to turn the samples into per-conversation token averages. The
+`(template only)` prompt fields want the prompt scaffolding without the user message or
+draft answer baked in (those are counted separately).
 
 ## User-first flow
 
-| Field in the app            | File                     | Format                |
-| --------------------------- | ------------------------ | --------------------- |
-| 1) Sample user message      | `user-messages.json`     | JSON chat transcript  |
-| 2) Evaluation prompt        | `evaluation-prompt.txt`  | Plain text            |
-| 2) Gate decision output     | `gate-decisions.json`    | JSON (optional)       |
-| 3.a) Answer prompt          | `answer-prompt.txt`      | Plain text            |
-| 3.a) Draft LLM answer       | `draft-answers.txt`      | One answer per line   |
-| 4) Judge prompt             | `judge-prompt.txt`       | Plain text            |
-| 4) Judge decision output    | `judge-decisions.json`   | JSON (optional)       |
+| Block · field in the app        | File                     | Format                |
+| ------------------------------- | ------------------------ | --------------------- |
+| Trigger · User message          | `user-messages.json`     | JSON chat transcript  |
+| Gate · Eval prompt (template)   | `evaluation-prompt.txt`  | Plain text            |
+| Gate · Gate decision output     | `gate-decisions.json`    | JSON (optional)       |
+| Answer · Answer prompt (template) | `answer-prompt.txt`    | Plain text            |
+| Answer · Draft LLM answer       | `draft-answers.txt`      | One answer per line   |
+| Judge · Judge prompt (template) | `judge-prompt.txt`       | Plain text            |
+| Judge · Judge decision output   | `judge-decisions.json`   | JSON (optional)       |
 
-## Assistant-first opener (extra fields)
+## Assistant-first opener (extra block)
 
-| Field in the app            | File                     | Format                |
-| --------------------------- | ------------------------ | --------------------- |
-| 0) Opening prompt           | `opening-prompt.txt`     | Plain text            |
-| 0) Opening message          | `opening-messages.txt`   | One message per line  |
+| Block · field in the app        | File                     | Format                |
+| ------------------------------- | ------------------------ | --------------------- |
+| Opening · Opening prompt (template) | `opening-prompt.txt` | Plain text            |
+| Opening · Opening message       | `opening-messages.txt`   | One message per line  |
 
 The files intentionally mix JSON transcripts and newline-delimited text so you can see
 both parsing paths the calculator supports. JSON objects are flattened by pulling text

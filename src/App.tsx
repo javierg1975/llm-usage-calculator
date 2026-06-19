@@ -1,12 +1,15 @@
-import { useMemo, useState, type ChangeEvent } from 'react'
+import { Fragment, useMemo, useState, type ChangeEvent } from 'react'
 import './App.css'
 import {
   calculateAnnualBudget,
   type AnnualBudgetResult,
 } from './lib/calculator'
 import {
-  estimateConversationWorkflow,
-  type ConversationWorkflowInput,
+  combineFlowStages,
+  expectedAttemptsWithCap,
+  type FlowStageInput,
+  type FlowStagesEstimate,
+  type StageKind,
 } from './lib/conversationWorkflow'
 import {
   FREQUENCY_UNITS,
@@ -16,7 +19,7 @@ import {
 } from './lib/frequency'
 import { ENGAGEMENT_DISTRIBUTIONS } from './lib/distributions'
 import { AZURE_DATA_ZONE_MODELS } from './lib/models'
-import { parseSampleTextEntries } from './lib/sampleText'
+import { parseSampleTextEntries, summarizeSampleText } from './lib/sampleText'
 import type { WorkloadRowInput } from './lib/types'
 
 const tokenFormatter = new Intl.NumberFormat('en-US', {
@@ -37,152 +40,218 @@ const decimalFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 })
 
-type FlowTemplateId = 'user-first' | 'assistant-first'
+// --- Stage component palette ----------------------------------------------
+// Each stage kind declares its rate knobs and sample slots. Slot keys match the
+// names the engine's combineFlowStages reads (gatePrompt, draftAnswer, …).
 
-type FlowTemplate = {
-  id: FlowTemplateId
-  name: string
-  description: string
-  includesOpeningRoundtrip: boolean
-  defaultInputTokensPerConversation: number
-  defaultOutputTokensPerConversation: number
-}
+type StageKnobField = 'engageRatePercent' | 'judgePassRatePercent' | 'maxAnswerAttempts'
 
-const FLOW_TEMPLATES: FlowTemplate[] = [
-  {
-    id: 'user-first',
-    name: 'User-first conversation',
-    description:
-      'User message arrives first, then gate → answer → judge with retries.',
-    includesOpeningRoundtrip: false,
-    defaultInputTokensPerConversation: 2200,
-    defaultOutputTokensPerConversation: 350,
-  },
-  {
-    id: 'assistant-first',
-    name: 'Assistant-first opener',
-    description:
-      'LLM generates an opening message first, then user-first flow continues.',
-    includesOpeningRoundtrip: true,
-    defaultInputTokensPerConversation: 2500,
-    defaultOutputTokensPerConversation: 450,
-  },
-]
-
-const getTemplate = (templateId: FlowTemplateId): FlowTemplate =>
-  FLOW_TEMPLATES.find((template) => template.id === templateId) ?? FLOW_TEMPLATES[0]
-
-type ConversationFlowDraft = {
-  id: string
+type StageKnobDef = {
+  field: StageKnobField
   label: string
-  templateId: FlowTemplateId
-  conversationFrequencyValue: number
-  conversationFrequencyUnit: FrequencyUnit
-  engageRatePercent: number
-  judgePassRatePercent: number
-  maxAnswerAttempts: number
-  expectedInputTokensPerConversation: number
-  expectedOutputTokensPerConversation: number
-  expectedOpeningCallsPerConversation: number
-  expectedAttemptsWhenEngaged: number
-  expectedAnswerCallsPerConversation: number
-  expectedJudgeCallsPerConversation: number
-  openingPromptSamplesText: string
-  openingMessageSamplesText: string
-  userMessageSamplesText: string
-  evaluationPromptSamplesText: string
-  evaluationDecisionSamplesText: string
-  answerPromptSamplesText: string
-  draftAnswerSamplesText: string
-  judgePromptSamplesText: string
-  judgeDecisionSamplesText: string
+  suffix?: string
+  min: number
+  max?: number
+  step: number
 }
 
-type EditableNumericFlowField =
-  | 'conversationFrequencyValue'
-  | 'engageRatePercent'
-  | 'judgePassRatePercent'
-  | 'maxAnswerAttempts'
-  | 'expectedInputTokensPerConversation'
-  | 'expectedOutputTokensPerConversation'
-
-type TextFlowField =
-  | 'openingPromptSamplesText'
-  | 'openingMessageSamplesText'
-  | 'userMessageSamplesText'
-  | 'evaluationPromptSamplesText'
-  | 'evaluationDecisionSamplesText'
-  | 'answerPromptSamplesText'
-  | 'draftAnswerSamplesText'
-  | 'judgePromptSamplesText'
-  | 'judgeDecisionSamplesText'
-
-type SampleFieldConfig = {
-  key: TextFlowField
+type StageSlotDef = {
+  key: string
   label: string
   placeholder: string
   optional?: boolean
 }
 
-const USER_FIRST_SAMPLE_FIELDS: SampleFieldConfig[] = [
-  {
-    key: 'userMessageSamplesText',
-    label: '1) Sample user message',
-    placeholder: 'Paste one user message per line, or JSON transcripts.',
-  },
-  {
-    key: 'evaluationPromptSamplesText',
-    label: '2) Evaluation prompt',
-    placeholder: 'Prompt used to decide whether to engage.',
-  },
-  {
-    key: 'evaluationDecisionSamplesText',
-    label: '2) Gate decision output',
-    placeholder: 'Optional examples like yes/no or classifier JSON.',
-    optional: true,
-  },
-  {
-    key: 'answerPromptSamplesText',
-    label: '3.a) Answer prompt',
-    placeholder: 'Prompt used to answer the user.',
-  },
-  {
-    key: 'draftAnswerSamplesText',
-    label: '3.a) Draft LLM answer',
-    placeholder: 'Candidate answers from the model.',
-  },
-  {
-    key: 'judgePromptSamplesText',
-    label: '4) Judge prompt',
-    placeholder: 'Prompt used for LLM-as-a-judge validation.',
-  },
-  {
-    key: 'judgeDecisionSamplesText',
-    label: '4) Judge decision output',
-    placeholder: 'Optional pass/fail outputs or score JSON.',
-    optional: true,
-  },
-]
-
-const ASSISTANT_FIRST_OPENING_FIELDS: SampleFieldConfig[] = [
-  {
-    key: 'openingPromptSamplesText',
-    label: '0) Opening prompt',
-    placeholder: 'Prompt used to generate the initial outbound message.',
-  },
-  {
-    key: 'openingMessageSamplesText',
-    label: '0) Opening message',
-    placeholder: 'Initial outbound message sample(s) sent before user response.',
-  },
-]
-
-const getSampleFieldsForTemplate = (templateId: FlowTemplateId): SampleFieldConfig[] => {
-  const template = getTemplate(templateId)
-  return template.includesOpeningRoundtrip
-    ? [...ASSISTANT_FIRST_OPENING_FIELDS, ...USER_FIRST_SAMPLE_FIELDS]
-    : USER_FIRST_SAMPLE_FIELDS
+type StageDef = {
+  kind: StageKind
+  name: string
+  caption: string
+  iconPath: string
+  knobs: StageKnobDef[]
+  slots: StageSlotDef[]
+  // Seed averages so a freshly added stage yields a sensible estimate before
+  // any samples are pasted. Overwritten by "Estimate workflow".
+  defaultAverages: Record<string, number>
 }
+
+const ENGAGE_KNOB: StageKnobDef = {
+  field: 'engageRatePercent',
+  label: 'Engage rate after gate',
+  suffix: '%',
+  min: 0,
+  max: 100,
+  step: 0.1,
+}
+const PASS_KNOB: StageKnobDef = {
+  field: 'judgePassRatePercent',
+  label: 'Judge pass rate per attempt',
+  suffix: '%',
+  min: 0,
+  max: 100,
+  step: 0.1,
+}
+const ATTEMPTS_KNOB: StageKnobDef = {
+  field: 'maxAnswerAttempts',
+  label: 'Max answer attempts',
+  min: 1,
+  step: 1,
+}
+
+const STAGE_DEFS: Record<StageKind, StageDef> = {
+  opening: {
+    kind: 'opening',
+    name: 'Opening',
+    caption: 'Assistant sends the first message',
+    iconPath:
+      'M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z',
+    knobs: [],
+    slots: [
+      {
+        key: 'openingPrompt',
+        label: 'Opening prompt (template)',
+        placeholder: 'Prompt used to generate the initial outbound message.',
+      },
+      {
+        key: 'openingMessage',
+        label: 'Opening message',
+        placeholder: 'Initial outbound message sample(s) sent before the user replies.',
+      },
+    ],
+    defaultAverages: { openingPrompt: 300, openingMessage: 90 },
+  },
+  gate: {
+    kind: 'gate',
+    name: 'Gate',
+    caption: 'Decide whether to engage (scales everything downstream)',
+    iconPath:
+      'M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z',
+    knobs: [ENGAGE_KNOB],
+    slots: [
+      {
+        key: 'gatePrompt',
+        label: 'Gate prompt (template only)',
+        placeholder:
+          'Prompt scaffolding that decides whether to engage. Leave out the user message — it is counted separately.',
+      },
+      {
+        key: 'gateDecision',
+        label: 'Gate decision output',
+        placeholder: 'Optional examples like yes/no or classifier JSON.',
+        optional: true,
+      },
+    ],
+    defaultAverages: { gatePrompt: 220, gateDecision: 8 },
+  },
+  answerJudge: {
+    kind: 'answerJudge',
+    name: 'Answer → Judge',
+    caption: 'Draft an answer, judge it, retry until it passes',
+    iconPath:
+      'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z',
+    knobs: [PASS_KNOB, ATTEMPTS_KNOB],
+    slots: [
+      {
+        key: 'answerPrompt',
+        label: 'Answer prompt (template only)',
+        placeholder:
+          'Prompt scaffolding used to answer. Leave out the user message — it is counted separately.',
+      },
+      {
+        key: 'draftAnswer',
+        label: 'Draft LLM answer',
+        placeholder: 'Candidate answers from the model.',
+      },
+      {
+        key: 'judgePrompt',
+        label: 'Judge prompt (template only)',
+        placeholder:
+          'LLM-as-a-judge scaffolding. Leave out the answer/message — they are counted separately.',
+      },
+      {
+        key: 'judgeDecision',
+        label: 'Judge decision output',
+        placeholder: 'Optional pass/fail outputs or score JSON.',
+        optional: true,
+      },
+    ],
+    defaultAverages: {
+      answerPrompt: 520,
+      draftAnswer: 260,
+      judgePrompt: 340,
+      judgeDecision: 14,
+    },
+  },
+  call: {
+    kind: 'call',
+    name: 'LLM call',
+    caption: 'A generic single call (prompt → response)',
+    iconPath:
+      'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+    knobs: [],
+    slots: [
+      {
+        key: 'callPrompt',
+        label: 'Prompt (template only)',
+        placeholder:
+          'Prompt scaffolding for this call. Leave out the user message — it is counted separately.',
+      },
+      {
+        key: 'callResponse',
+        label: 'Response output',
+        placeholder: 'Sample model responses for this call.',
+      },
+    ],
+    defaultAverages: { callPrompt: 300, callResponse: 200 },
+  },
+}
+
+const STAGE_KINDS: StageKind[] = ['opening', 'gate', 'answerJudge', 'call']
+
+const getStageDef = (kind: StageKind): StageDef => STAGE_DEFS[kind]
+
+type FlowStageDraft = {
+  id: string
+  kind: StageKind
+  engageRatePercent: number
+  judgePassRatePercent: number
+  maxAnswerAttempts: number
+  samples: Record<string, string> // slot key -> sample text
+  averages: Record<string, number> // slot key -> average tokens
+}
+
+type ConversationFlowDraft = {
+  id: string
+  label: string
+  // The preset the stages came from, or 'custom' once the structure is hand-edited.
+  presetId: FlowPresetId | 'custom'
+  conversationFrequencyValue: number
+  conversationFrequencyUnit: FrequencyUnit
+  // Shared user message — the conversation input every gate/answer/judge call sees.
+  userMessageSamplesText: string
+  userMessageAverage: number
+  stages: FlowStageDraft[]
+}
+
+type FlowPresetId = 'user-first' | 'assistant-first' | 'blank'
+
+type FlowPreset = {
+  id: FlowPresetId
+  name: string
+  stageKinds: StageKind[]
+}
+
+const FLOW_PRESETS: FlowPreset[] = [
+  { id: 'user-first', name: 'User-first conversation', stageKinds: ['gate', 'answerJudge'] },
+  {
+    id: 'assistant-first',
+    name: 'Assistant-first opener',
+    stageKinds: ['opening', 'gate', 'answerJudge'],
+  },
+  { id: 'blank', name: 'Blank canvas (build your own)', stageKinds: [] },
+]
+
+const getPreset = (presetId: FlowPresetId): FlowPreset =>
+  FLOW_PRESETS.find((preset) => preset.id === presetId) ?? FLOW_PRESETS[0]
 
 type FlowFeedback = {
   kind: 'success' | 'error'
@@ -190,75 +259,85 @@ type FlowFeedback = {
 }
 
 let flowSequence = 1
+let stageSequence = 1
 
-const createFlowFromTemplate = (
-  templateId: FlowTemplateId,
+const makeStage = (kind: StageKind): FlowStageDraft => ({
+  id: `stage-${stageSequence += 1}`,
+  kind,
+  engageRatePercent: 80,
+  judgePassRatePercent: 85,
+  maxAnswerAttempts: 3,
+  samples: {},
+  averages: { ...getStageDef(kind).defaultAverages },
+})
+
+const createFlowFromPreset = (
+  presetId: FlowPresetId,
   label = 'Core question-answer flow',
-): ConversationFlowDraft => {
-  const template = getTemplate(templateId)
-
-  return {
-    id: `flow-${flowSequence += 1}`,
-    label,
-    templateId,
-    conversationFrequencyValue: 24,
-    conversationFrequencyUnit: 'year',
-    engageRatePercent: 80,
-    judgePassRatePercent: 85,
-    maxAnswerAttempts: 3,
-    expectedInputTokensPerConversation: template.defaultInputTokensPerConversation,
-    expectedOutputTokensPerConversation: template.defaultOutputTokensPerConversation,
-    expectedOpeningCallsPerConversation: template.includesOpeningRoundtrip ? 1 : 0,
-    expectedAttemptsWhenEngaged: 1.1,
-    expectedAnswerCallsPerConversation: 0.88,
-    expectedJudgeCallsPerConversation: 0.88,
-    openingPromptSamplesText: '',
-    openingMessageSamplesText: '',
-    userMessageSamplesText: '',
-    evaluationPromptSamplesText: '',
-    evaluationDecisionSamplesText: '',
-    answerPromptSamplesText: '',
-    draftAnswerSamplesText: '',
-    judgePromptSamplesText: '',
-    judgeDecisionSamplesText: '',
-  }
-}
+): ConversationFlowDraft => ({
+  id: `flow-${flowSequence += 1}`,
+  label,
+  presetId,
+  conversationFrequencyValue: 24,
+  conversationFrequencyUnit: 'year',
+  userMessageSamplesText: '',
+  userMessageAverage: 120,
+  stages: getPreset(presetId).stageKinds.map(makeStage),
+})
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value))
 
 const formatTokens = (value: number): string => tokenFormatter.format(Math.round(value))
 
-const toWorkflowInput = (flow: ConversationFlowDraft): ConversationWorkflowInput => ({
-  includeAssistantOpeningRoundtrip: getTemplate(flow.templateId).includesOpeningRoundtrip,
-  openingPromptSamplesText: flow.openingPromptSamplesText,
-  openingMessageSamplesText: flow.openingMessageSamplesText,
-  userMessageSamplesText: flow.userMessageSamplesText,
-  evaluationPromptSamplesText: flow.evaluationPromptSamplesText,
-  evaluationDecisionSamplesText: flow.evaluationDecisionSamplesText,
-  answerPromptSamplesText: flow.answerPromptSamplesText,
-  draftAnswerSamplesText: flow.draftAnswerSamplesText,
-  judgePromptSamplesText: flow.judgePromptSamplesText,
-  judgeDecisionSamplesText: flow.judgeDecisionSamplesText,
-  engageRate: clamp(flow.engageRatePercent, 0, 100) / 100,
-  judgePassRate: clamp(flow.judgePassRatePercent, 0, 100) / 100,
-  maxAnswerAttempts: Math.max(1, Math.floor(flow.maxAnswerAttempts || 1)),
+const stageToInput = (stage: FlowStageDraft): FlowStageInput => ({
+  id: stage.id,
+  kind: stage.kind,
+  averages: stage.averages,
+  engageRate: clamp(stage.engageRatePercent, 0, 100) / 100,
+  judgePassRate: clamp(stage.judgePassRatePercent, 0, 100) / 100,
+  maxAnswerAttempts: Math.max(1, Math.floor(stage.maxAnswerAttempts || 1)),
 })
 
-const toWorkload = (flow: ConversationFlowDraft): WorkloadRowInput => ({
-  id: flow.id,
-  label: flow.label,
-  promptsPerConversation: 1,
-  averagePromptTokens: flow.expectedInputTokensPerConversation,
-  userMessagesPerConversation: 0,
-  averageUserMessageTokens: 0,
-  llmResponsesPerConversation: 1,
-  averageLlmResponseTokens: flow.expectedOutputTokensPerConversation,
-  conversationsPerUserPerYear: toAnnualFrequency(
-    flow.conversationFrequencyValue,
-    flow.conversationFrequencyUnit,
-  ),
-})
+// Recombine stored averages with the live knobs. Pure + cheap, so it runs on
+// every render and the rate knobs update the budget instantly.
+const deriveFlow = (
+  flow: ConversationFlowDraft,
+  apiInputOverhead: number,
+): FlowStagesEstimate =>
+  combineFlowStages(flow.stages.map(stageToInput), {
+    userMessageAverageTokens: flow.userMessageAverage,
+    apiInputOverhead,
+  })
+
+const toWorkload = (
+  flow: ConversationFlowDraft,
+  apiInputOverhead: number,
+): WorkloadRowInput => {
+  const estimate = deriveFlow(flow, apiInputOverhead)
+  return {
+    id: flow.id,
+    label: flow.label,
+    promptsPerConversation: 1,
+    averagePromptTokens: estimate.expectedInputTokensPerConversation,
+    userMessagesPerConversation: 0,
+    averageUserMessageTokens: 0,
+    llmResponsesPerConversation: 1,
+    averageLlmResponseTokens: estimate.expectedOutputTokensPerConversation,
+    conversationsPerUserPerYear: toAnnualFrequency(
+      flow.conversationFrequencyValue,
+      flow.conversationFrequencyUnit,
+    ),
+  }
+}
+
+// Expected extra API attempts per call from transport-level failures that get
+// retried — a small multiplier (~1.01 at 99%/3) applied to input tokens.
+const apiInputOverheadFrom = (successRatePercent: number, maxAttempts: number): number =>
+  expectedAttemptsWithCap(
+    clamp(successRatePercent, 0, 100) / 100,
+    Math.max(1, Math.floor(maxAttempts || 1)),
+  )
 
 const flowCadenceSummary = (flow: ConversationFlowDraft): string => {
   const annualConversations = toAnnualFrequency(
@@ -279,10 +358,13 @@ function App() {
     ENGAGEMENT_DISTRIBUTIONS[0].id,
   )
   const [annualUsers, setAnnualUsers] = useState(10000)
-  const [newFlowTemplateId, setNewFlowTemplateId] =
-    useState<FlowTemplateId>('user-first')
+  // Global transport-level API reliability — applied to input tokens across all flows.
+  const [apiSuccessRatePercent, setApiSuccessRatePercent] = useState(99)
+  const [apiMaxAttempts, setApiMaxAttempts] = useState(3)
+  const [newFlowPresetId, setNewFlowPresetId] =
+    useState<FlowPresetId>('user-first')
   const [flows, setFlows] = useState<ConversationFlowDraft[]>([
-    createFlowFromTemplate('user-first'),
+    createFlowFromPreset('user-first'),
   ])
   const [flowFeedback, setFlowFeedback] = useState<
     Record<string, FlowFeedback | undefined>
@@ -291,8 +373,10 @@ function App() {
   // Accordion state: track which flows are collapsed (default true/expanded)
   const [collapsedFlows, setCollapsedFlows] = useState<Record<string, boolean>>({})
 
-  // Tab state per flow: 'rates' or 'samples'
-  const [flowTabs, setFlowTabs] = useState<Record<string, 'rates' | 'samples'>>({})
+  const apiInputOverhead = useMemo(
+    () => apiInputOverheadFrom(apiSuccessRatePercent, apiMaxAttempts),
+    [apiSuccessRatePercent, apiMaxAttempts],
+  )
 
   const selectedModel = useMemo(
     () =>
@@ -314,9 +398,9 @@ function App() {
         annualUsers,
         model: selectedModel,
         distribution: selectedDistribution,
-        workloads: flows.map(toWorkload),
+        workloads: flows.map((flow) => toWorkload(flow, apiInputOverhead)),
       }),
-    [annualUsers, flows, selectedDistribution, selectedModel],
+    [annualUsers, apiInputOverhead, flows, selectedDistribution, selectedModel],
   )
 
   const annualConversationsPerUser = useMemo(
@@ -329,75 +413,109 @@ function App() {
     [flows],
   )
 
-  const handleFlowNumberChange = (
+  const updateFlow = (
     flowId: string,
-    field: EditableNumericFlowField,
-    value: number,
+    updater: (flow: ConversationFlowDraft) => ConversationFlowDraft,
   ): void => {
-    const normalizedValue = Number.isFinite(value) ? value : 0
     setFlows((currentFlows) =>
-      currentFlows.map((flow) => {
-        if (flow.id !== flowId) {
-          return flow
-        }
-        if (field === 'engageRatePercent' || field === 'judgePassRatePercent') {
-          return { ...flow, [field]: clamp(normalizedValue, 0, 100) }
-        }
-        if (field === 'maxAnswerAttempts') {
-          return { ...flow, [field]: Math.max(1, Math.floor(normalizedValue || 1)) }
-        }
-        return { ...flow, [field]: Math.max(0, normalizedValue) }
-      }),
+      currentFlows.map((flow) => (flow.id === flowId ? updater(flow) : flow)),
     )
+  }
+
+  const updateStage = (
+    flowId: string,
+    stageId: string,
+    updater: (stage: FlowStageDraft) => FlowStageDraft,
+  ): void => {
+    updateFlow(flowId, (flow) => ({
+      ...flow,
+      stages: flow.stages.map((stage) =>
+        stage.id === stageId ? updater(stage) : stage,
+      ),
+    }))
+  }
+
+  const handleFlowFrequencyValueChange = (flowId: string, value: number): void => {
+    const normalized = Number.isFinite(value) ? Math.max(0, value) : 0
+    updateFlow(flowId, (flow) => ({ ...flow, conversationFrequencyValue: normalized }))
   }
 
   const handleFlowFrequencyUnitChange = (
     flowId: string,
     value: FrequencyUnit,
   ): void => {
-    setFlows((currentFlows) =>
-      currentFlows.map((flow) =>
-        flow.id === flowId ? { ...flow, conversationFrequencyUnit: value } : flow,
-      ),
-    )
-  }
-
-  const handleFlowTemplateChange = (
-    flowId: string,
-    value: FlowTemplateId,
-  ): void => {
-    const template = getTemplate(value)
-    setFlows((currentFlows) =>
-      currentFlows.map((flow) =>
-        flow.id === flowId
-          ? {
-              ...flow,
-              templateId: value,
-              expectedOpeningCallsPerConversation: template.includesOpeningRoundtrip
-                ? flow.expectedOpeningCallsPerConversation || 1
-                : 0,
-            }
-          : flow,
-      ),
-    )
+    updateFlow(flowId, (flow) => ({ ...flow, conversationFrequencyUnit: value }))
   }
 
   const handleFlowLabelChange = (flowId: string, label: string): void => {
-    setFlows((currentFlows) =>
-      currentFlows.map((flow) => (flow.id === flowId ? { ...flow, label } : flow)),
+    updateFlow(flowId, (flow) => ({ ...flow, label }))
+  }
+
+  const handleUserMessageChange = (flowId: string, value: string): void => {
+    updateFlow(flowId, (flow) => ({ ...flow, userMessageSamplesText: value }))
+  }
+
+  const handleStageKnobChange = (
+    flowId: string,
+    stageId: string,
+    field: StageKnobField,
+    value: number,
+  ): void => {
+    const normalized = Number.isFinite(value) ? value : 0
+    updateStage(flowId, stageId, (stage) =>
+      field === 'maxAnswerAttempts'
+        ? { ...stage, maxAnswerAttempts: Math.max(1, Math.floor(normalized || 1)) }
+        : { ...stage, [field]: clamp(normalized, 0, 100) },
     )
   }
 
-  const handleFlowTextChange = (
+  const handleStageSampleChange = (
     flowId: string,
-    field: TextFlowField,
+    stageId: string,
+    slotKey: string,
     value: string,
   ): void => {
-    setFlows((currentFlows) =>
-      currentFlows.map((flow) =>
-        flow.id === flowId ? { ...flow, [field]: value } : flow,
-      ),
-    )
+    updateStage(flowId, stageId, (stage) => ({
+      ...stage,
+      samples: { ...stage.samples, [slotKey]: value },
+    }))
+  }
+
+  const applyPreset = (flowId: string, presetId: FlowPresetId): void => {
+    updateFlow(flowId, (flow) => ({
+      ...flow,
+      presetId,
+      stages: getPreset(presetId).stageKinds.map(makeStage),
+    }))
+  }
+
+  const addStage = (flowId: string, kind: StageKind): void => {
+    updateFlow(flowId, (flow) => ({
+      ...flow,
+      presetId: 'custom',
+      stages: [...flow.stages, makeStage(kind)],
+    }))
+  }
+
+  const removeStage = (flowId: string, stageId: string): void => {
+    updateFlow(flowId, (flow) => ({
+      ...flow,
+      presetId: 'custom',
+      stages: flow.stages.filter((stage) => stage.id !== stageId),
+    }))
+  }
+
+  const moveStage = (flowId: string, stageId: string, direction: -1 | 1): void => {
+    updateFlow(flowId, (flow) => {
+      const index = flow.stages.findIndex((stage) => stage.id === stageId)
+      const target = index + direction
+      if (index < 0 || target < 0 || target >= flow.stages.length) {
+        return flow
+      }
+      const stages = [...flow.stages]
+      ;[stages[index], stages[target]] = [stages[target], stages[index]]
+      return { ...flow, presetId: 'custom', stages }
+    })
   }
 
   const estimateFlowFromSamples = async (flowId: string): Promise<void> => {
@@ -408,32 +526,23 @@ function App() {
 
     try {
       const { countTokens } = await import('./lib/tokenization')
-      const estimate = estimateConversationWorkflow(toWorkflowInput(flow), countTokens)
-      setFlows((currentFlows) =>
-        currentFlows.map((entry) =>
-          entry.id === flowId
-            ? {
-                ...entry,
-                expectedInputTokensPerConversation:
-                  estimate.expectedInputTokensPerConversation,
-                expectedOutputTokensPerConversation:
-                  estimate.expectedOutputTokensPerConversation,
-                expectedOpeningCallsPerConversation:
-                  estimate.expectedOpeningCallsPerConversation,
-                expectedAttemptsWhenEngaged: estimate.expectedAttemptsWhenEngaged,
-                expectedAnswerCallsPerConversation:
-                  estimate.expectedAnswerCallsPerConversation,
-                expectedJudgeCallsPerConversation: estimate.expectedJudgeCallsPerConversation,
-              }
-            : entry,
-        ),
-      )
+      const avgOf = (text: string): number =>
+        summarizeSampleText(text, countTokens).averageTokens
+      const userMessageAverage = avgOf(flow.userMessageSamplesText)
+      const stages = flow.stages.map((stage) => {
+        const averages: Record<string, number> = {}
+        for (const slotDef of getStageDef(stage.kind).slots) {
+          averages[slotDef.key] = avgOf(stage.samples[slotDef.key] ?? '')
+        }
+        return { ...stage, averages }
+      })
+      updateFlow(flowId, (entry) => ({ ...entry, userMessageAverage, stages }))
       setFlowFeedback((currentFeedback) => ({
         ...currentFeedback,
         [flowId]: {
           kind: 'success',
           message:
-            'Workflow estimates updated from sample text, including gating, retries, and template-specific roundtrips.',
+            'Token averages updated from sample text. Rate knobs now scale the estimate live.',
         },
       }))
     } catch (error) {
@@ -448,24 +557,23 @@ function App() {
     }
   }
 
-  const handleFileUpload = async (
+  const loadFileInto = async (
     flowId: string,
-    field: TextFlowField,
     event: ChangeEvent<HTMLInputElement>,
+    apply: (contents: string) => void,
   ): Promise<void> => {
     const file = event.target.files?.[0]
     if (!file) {
       return
     }
-
     try {
       const contents = await file.text()
-      handleFlowTextChange(flowId, field, contents)
+      apply(contents)
       setFlowFeedback((currentFeedback) => ({
         ...currentFeedback,
         [flowId]: {
           kind: 'success',
-          message: `Loaded ${file.name}. Click "Estimate workflow from samples" to apply.`,
+          message: `Loaded ${file.name}. Click "Estimate workflow" to apply.`,
         },
       }))
     } catch (error) {
@@ -481,13 +589,10 @@ function App() {
   }
 
   const addFlow = (): void => {
-    const template = getTemplate(newFlowTemplateId)
+    const preset = getPreset(newFlowPresetId)
     setFlows((currentFlows) => [
       ...currentFlows,
-      createFlowFromTemplate(
-        newFlowTemplateId,
-        `${template.name} ${currentFlows.length + 1}`,
-      ),
+      createFlowFromPreset(newFlowPresetId, `${preset.name} ${currentFlows.length + 1}`),
     ])
   }
 
@@ -508,13 +613,6 @@ function App() {
     setCollapsedFlows((prev) => ({
       ...prev,
       [flowId]: !prev[flowId],
-    }))
-  }
-
-  const setFlowTab = (flowId: string, tab: 'rates' | 'samples') => {
-    setFlowTabs((prev) => ({
-      ...prev,
-      [flowId]: tab,
     }))
   }
 
@@ -573,19 +671,145 @@ function App() {
                 </select>
               </label>
 
-              <label>
-                Users per year
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={annualUsers}
-                  onChange={(event) =>
-                    setAnnualUsers(Math.max(0, Math.floor(Number(event.target.value) || 0)))
-                  }
-                />
-              </label>
+              <div className="stage-knob-container" style={{ border: 'none', padding: 0, background: 'none' }}>
+                <label className="stage-knob-label-row">
+                  <span>Users per year</span>
+                </label>
+                <div className="stage-knob-control-row">
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={annualUsers}
+                    onChange={(event) =>
+                      setAnnualUsers(Math.max(0, Math.floor(Number(event.target.value) || 0)))
+                    }
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div className="preset-chips">
+                  {[
+                    { label: '1k', value: 1000 },
+                    { label: '10k', value: 10000 },
+                    { label: '100k', value: 100000 },
+                    { label: '1M', value: 1000000 },
+                  ].map((p) => (
+                    <button
+                      type="button"
+                      key={p.label}
+                      className={`preset-chip${annualUsers === p.value ? ' active' : ''}`}
+                      onClick={() => setAnnualUsers(p.value)}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="stage-knob-container" style={{ border: 'none', padding: 0, background: 'none' }}>
+                <label className="stage-knob-label-row">
+                  <span>API success rate (%)</span>
+                </label>
+                <div className="stage-knob-control-row">
+                  <input
+                    type="range"
+                    className="stage-knob-slider"
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    value={apiSuccessRatePercent}
+                    onChange={(event) =>
+                      setApiSuccessRatePercent(clamp(Number(event.target.value) || 0, 0, 100))
+                    }
+                  />
+                  <span className="stage-knob-number-wrapper">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.1}
+                      value={apiSuccessRatePercent}
+                      onChange={(event) =>
+                        setApiSuccessRatePercent(clamp(Number(event.target.value) || 0, 0, 100))
+                      }
+                    />
+                    <span className="stage-knob-suffix">%</span>
+                  </span>
+                </div>
+                <div className="preset-chips">
+                  {[
+                    { label: '90%', value: 90 },
+                    { label: '95%', value: 95 },
+                    { label: '99% (Typical)', value: 99 },
+                    { label: '99.9%', value: 99.9 },
+                    { label: '100%', value: 100 },
+                  ].map((p) => (
+                    <button
+                      type="button"
+                      key={p.label}
+                      className={`preset-chip${apiSuccessRatePercent === p.value ? ' active' : ''}`}
+                      onClick={() => setApiSuccessRatePercent(p.value)}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="stage-knob-container" style={{ border: 'none', padding: 0, background: 'none' }}>
+                <label className="stage-knob-label-row">
+                  <span>Max API attempts per call</span>
+                </label>
+                <div className="stage-knob-control-row">
+                  <input
+                    type="range"
+                    className="stage-knob-slider"
+                    min={1}
+                    max={5}
+                    step={1}
+                    value={apiMaxAttempts}
+                    onChange={(event) =>
+                      setApiMaxAttempts(Math.max(1, Math.floor(Number(event.target.value) || 1)))
+                    }
+                  />
+                  <span className="stage-knob-number-wrapper">
+                    <input
+                      type="number"
+                      min={1}
+                      max={5}
+                      step={1}
+                      value={apiMaxAttempts}
+                      onChange={(event) =>
+                        setApiMaxAttempts(Math.max(1, Math.floor(Number(event.target.value) || 1)))
+                      }
+                    />
+                  </span>
+                </div>
+                <div className="preset-chips">
+                  {[
+                    { label: '1 (None)', value: 1 },
+                    { label: '2', value: 2 },
+                    { label: '3 (Typical)', value: 3 },
+                    { label: '5', value: 5 },
+                  ].map((p) => (
+                    <button
+                      type="button"
+                      key={p.label}
+                      className={`preset-chip${apiMaxAttempts === p.value ? ' active' : ''}`}
+                      onClick={() => setApiMaxAttempts(p.value)}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
+            <p className="muted small">
+              Transport-level failures (timeouts, 5xx, rate limits) get retried, adding
+              ~{decimalFormatter.format((apiInputOverhead - 1) * 100)}% to input tokens.
+              Counted on input only — failed calls rarely bill for output. Set success to
+              100% to disable.
+            </p>
           </section>
 
           {/* Section 2: Engagement Distribution */}
@@ -663,11 +887,10 @@ function App() {
 
             <div className="workloads">
               {flows.map((flow, index) => {
-                const template = getTemplate(flow.templateId)
-                const sampleFields = getSampleFieldsForTemplate(flow.templateId)
+                const stages = flow.stages
                 const feedback = flowFeedback[flow.id]
                 const isCollapsed = !!collapsedFlows[flow.id]
-                const activeTab = flowTabs[flow.id] || 'rates'
+                const derived = deriveFlow(flow, apiInputOverhead)
 
                 return (
                   <article key={flow.id} className={`workload-row ${isCollapsed ? 'collapsed' : ''}`}>
@@ -713,284 +936,414 @@ function App() {
                           </p>
                         ) : null}
 
-                        {/* Interactive Workflow Pipeline Diagram */}
-                        <div className="workflow-pipeline">
-                          <div className="pipeline-node active">
-                            <svg className="node-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                            </svg>
-                            <span className="node-name">Trigger</span>
-                            <span className="node-value">{template.includesOpeningRoundtrip ? 'Assistant Opener' : 'User Msg'}</span>
-                          </div>
-                          
-                          <div className="pipeline-connector">
-                            <span className="connector-arrow">→</span>
-                          </div>
-
-                          <div className="pipeline-node">
-                            <svg className="node-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                            </svg>
-                            <span className="node-name">Gate</span>
-                            <span className="node-value">{flow.engageRatePercent}% engage</span>
-                          </div>
-
-                          <div className="pipeline-connector">
-                            <span className="connector-arrow">→</span>
-                          </div>
-
-                          <div className="pipeline-node">
-                            <svg className="node-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                            </svg>
-                            <span className="node-name">Answer</span>
-                            <span className="node-value">Max {flow.maxAnswerAttempts} tries</span>
-                          </div>
-
-                          <div className="pipeline-connector">
-                            <span className="connector-arrow">→</span>
-                          </div>
-
-                          <div className="pipeline-node">
-                            <svg className="node-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-                            </svg>
-                            <span className="node-name">Judge</span>
-                            <span className="node-value">{flow.judgePassRatePercent}% pass</span>
+                        {/* Preset starter + live pipeline preview */}
+                        <div className="template-section">
+                          <label className="template-select">
+                            <span className="template-select-title">Flow preset</span>
+                            <select
+                              value={flow.presetId}
+                              onChange={(event) => {
+                                const value = event.target.value
+                                if (value !== 'custom') {
+                                  applyPreset(flow.id, value as FlowPresetId)
+                                }
+                              }}
+                            >
+                              {flow.presetId === 'custom' ? (
+                                <option value="custom">Custom (edited)</option>
+                              ) : null}
+                              {FLOW_PRESETS.map((preset) => (
+                                <option key={preset.id} value={preset.id}>
+                                  {preset.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <div className="template-minimap" aria-hidden="true">
+                            {stages.length === 0 ? (
+                              <span className="minimap-empty">No stages yet — add one below</span>
+                            ) : (
+                              stages.map((stage, stageIndex) => (
+                                <Fragment key={`${flow.id}-mini-${stage.id}`}>
+                                  <div className="minimap-node">
+                                    <svg className="minimap-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getStageDef(stage.kind).iconPath} />
+                                    </svg>
+                                    <span>{getStageDef(stage.kind).name}</span>
+                                  </div>
+                                  {stageIndex < stages.length - 1 ? (
+                                    <span className="minimap-arrow">→</span>
+                                  ) : null}
+                                </Fragment>
+                              ))
+                            )}
                           </div>
                         </div>
 
-                        <div className="flow-tab-bar">
-                          <button
-                            type="button"
-                            className={`tab-btn ${activeTab === 'rates' ? 'active' : ''}`}
-                            onClick={() => setFlowTab(flow.id, 'rates')}
-                          >
-                            <svg className="tab-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                            </svg>
-                            Rates & Cadence
-                          </button>
-                          <button
-                            type="button"
-                            className={`tab-btn ${activeTab === 'samples' ? 'active' : ''}`}
-                            onClick={() => setFlowTab(flow.id, 'samples')}
-                          >
-                            <svg className="tab-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            Token Estimation Samples
-                          </button>
-                        </div>
-
-                        {activeTab === 'rates' ? (
-                          <div className="grid two tab-content-anim">
-                            <label>
-                              Flow label
+                        <div className="grid two">
+                          <label>
+                            Flow label
+                            <input
+                              type="text"
+                              value={flow.label}
+                              onChange={(event) =>
+                                handleFlowLabelChange(flow.id, event.target.value)
+                              }
+                            />
+                          </label>
+                          <label>
+                            Conversations per user
+                            <div className="frequency-controls">
                               <input
-                                type="text"
-                                value={flow.label}
+                                type="number"
+                                min={0}
+                                step={0.1}
+                                value={flow.conversationFrequencyValue}
                                 onChange={(event) =>
-                                  handleFlowLabelChange(flow.id, event.target.value)
+                                  handleFlowFrequencyValueChange(
+                                    flow.id,
+                                    Number(event.target.value),
+                                  )
                                 }
                               />
-                            </label>
-
-                            <label>
-                              Flow template
                               <select
-                                value={flow.templateId}
+                                value={flow.conversationFrequencyUnit}
                                 onChange={(event) =>
-                                  handleFlowTemplateChange(
+                                  handleFlowFrequencyUnitChange(
                                     flow.id,
-                                    event.target.value as FlowTemplateId,
+                                    event.target.value as FrequencyUnit,
                                   )
                                 }
                               >
-                                {FLOW_TEMPLATES.map((templateOption) => (
-                                  <option key={templateOption.id} value={templateOption.id}>
-                                    {templateOption.name}
+                                {FREQUENCY_UNITS.map((unit) => (
+                                  <option key={unit.id} value={unit.id}>
+                                    per {unit.label.toLowerCase()}
                                   </option>
                                 ))}
                               </select>
-                            </label>
+                            </div>
+                          </label>
 
-                            <label>
-                              Conversations per user
-                              <div className="frequency-controls">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  step={0.1}
-                                  value={flow.conversationFrequencyValue}
-                                  onChange={(event) =>
-                                    handleFlowNumberChange(
-                                      flow.id,
-                                      'conversationFrequencyValue',
-                                      Number(event.target.value),
-                                    )
-                                  }
-                                />
-                                <select
-                                  value={flow.conversationFrequencyUnit}
-                                  onChange={(event) =>
-                                    handleFlowFrequencyUnitChange(
-                                      flow.id,
-                                      event.target.value as FrequencyUnit,
-                                    )
-                                  }
-                                >
-                                  {FREQUENCY_UNITS.map((unit) => (
-                                    <option key={unit.id} value={unit.id}>
-                                      per {unit.label.toLowerCase()}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            </label>
-
-                            <label>
-                              Engage rate after gate (% yes)
-                              <input
-                                type="number"
-                                min={0}
-                                max={100}
-                                step={0.1}
-                                value={flow.engageRatePercent}
-                                onChange={(event) =>
-                                  handleFlowNumberChange(
-                                    flow.id,
-                                    'engageRatePercent',
-                                    Number(event.target.value),
-                                  )
-                                }
-                                className="slider-buddy"
-                              />
-                            </label>
-
-                            <label>
-                              Judge pass rate per attempt (%)
-                              <input
-                                type="number"
-                                min={0}
-                                max={100}
-                                step={0.1}
-                                value={flow.judgePassRatePercent}
-                                onChange={(event) =>
-                                  handleFlowNumberChange(
-                                    flow.id,
-                                    'judgePassRatePercent',
-                                    Number(event.target.value),
-                                  )
-                                }
-                              />
-                            </label>
-
-                            <label>
-                              Max answer attempts
-                              <input
-                                type="number"
-                                min={1}
-                                step={1}
-                                value={flow.maxAnswerAttempts}
-                                onChange={(event) =>
-                                  handleFlowNumberChange(
-                                    flow.id,
-                                    'maxAnswerAttempts',
-                                    Number(event.target.value),
-                                  )
-                                }
-                              />
-                            </label>
-
-                            <label>
-                              Expected input tokens / conversation
-                              <input
-                                type="number"
-                                min={0}
-                                step={0.01}
-                                value={flow.expectedInputTokensPerConversation}
-                                onChange={(event) =>
-                                  handleFlowNumberChange(
-                                    flow.id,
-                                    'expectedInputTokensPerConversation',
-                                    Number(event.target.value),
-                                  )
-                                }
-                              />
-                            </label>
-
-                            <label>
-                              Expected output tokens / conversation
-                              <input
-                                type="number"
-                                min={0}
-                                step={0.01}
-                                value={flow.expectedOutputTokensPerConversation}
-                                onChange={(event) =>
-                                  handleFlowNumberChange(
-                                    flow.id,
-                                    'expectedOutputTokensPerConversation',
-                                    Number(event.target.value),
-                                  )
-                                }
-                              />
-                            </label>
-                          </div>
-                        ) : (
-                          <div className="tab-content-anim">
-                            <p className="muted small info-banner">
-                              Provide raw text or paste logs below. The tokens of your samples will be analyzed to estimate averages.
-                            </p>
-                            <div className="sample-grid">
-                              {sampleFields.map((field) => {
-                                const fieldValue = flow[field.key]
-                                const entryCount = parseSampleTextEntries(fieldValue).length
-                                const optionalLabel = field.optional ? ' (optional)' : ''
+                          <div className="frequency-presets-container">
+                            <span className="frequency-label">Quick presets</span>
+                            <div className="preset-chips">
+                              {[
+                                { label: '1/day', val: 1, unit: 'day' as FrequencyUnit },
+                                { label: '5/week', val: 5, unit: 'week' as FrequencyUnit },
+                                { label: '1/week', val: 1, unit: 'week' as FrequencyUnit },
+                                { label: '10/month', val: 10, unit: 'month' as FrequencyUnit },
+                                { label: '1/month', val: 1, unit: 'month' as FrequencyUnit },
+                                { label: '1/year', val: 1, unit: 'year' as FrequencyUnit },
+                              ].map((p) => {
+                                const isActive =
+                                  flow.conversationFrequencyValue === p.val &&
+                                  flow.conversationFrequencyUnit === p.unit
                                 return (
-                                  <div className="sample-block" key={`${flow.id}-${field.key}`}>
-                                    <label className="textarea-label">
-                                      <span>{field.label}{optionalLabel}</span>
-                                      <span className="badge">{entryCount} parsed</span>
-                                    </label>
-                                    <textarea
-                                      rows={4}
-                                      value={fieldValue}
-                                      onChange={(event) =>
-                                        handleFlowTextChange(flow.id, field.key, event.target.value)
-                                      }
-                                      placeholder={field.placeholder}
-                                    />
-                                    <div className="file-upload-wrapper">
-                                      <svg className="upload-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                                      </svg>
-                                      <input
-                                        type="file"
-                                        accept=".txt,.md,.json,.csv,.log,text/plain,application/json"
-                                        onChange={(event) =>
-                                          void handleFileUpload(flow.id, field.key, event)
-                                        }
-                                      />
-                                    </div>
-                                  </div>
+                                  <button
+                                    type="button"
+                                    key={p.label}
+                                    className={`preset-chip${isActive ? ' active' : ''}`}
+                                    onClick={() => {
+                                      handleFlowFrequencyValueChange(flow.id, p.val)
+                                      handleFlowFrequencyUnitChange(flow.id, p.unit)
+                                    }}
+                                  >
+                                    {p.label}
+                                  </button>
                                 )
                               })}
                             </div>
                           </div>
-                        )}
+                        </div>
+
+                        <p className="muted small info-banner">
+                          Compose the flow from stages below — add, remove, or reorder them.
+                          The shared user message is the conversation input every gate /
+                          answer / judge call sees. Prompt fields want the template
+                          scaffolding only (the user message and draft answer are counted
+                          separately). Rates recompute the estimate live.
+                        </p>
+
+                        {/* Shared conversation input */}
+                        <div className="sample-block shared-input">
+                          <label className="textarea-label">
+                            <span>Shared user message</span>
+                            <span className="badge">
+                              {parseSampleTextEntries(flow.userMessageSamplesText).length} parsed
+                            </span>
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={flow.userMessageSamplesText}
+                            onChange={(event) =>
+                              handleUserMessageChange(flow.id, event.target.value)
+                            }
+                            placeholder="Paste one user message per line, or JSON transcripts."
+                          />
+                          <div className="file-upload-wrapper">
+                            <svg className="upload-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                            </svg>
+                            <input
+                              type="file"
+                              accept=".txt,.md,.json,.csv,.log,text/plain,application/json"
+                              onChange={(event) =>
+                                void loadFileInto(flow.id, event, (contents) =>
+                                  handleUserMessageChange(flow.id, contents),
+                                )
+                              }
+                            />
+                          </div>
+                        </div>
+
+                        {/* Editable vertical stage stack */}
+                        <div className="pipeline-vertical">
+                          {stages.map((stage, stageIndex) => {
+                            const def = getStageDef(stage.kind)
+                            return (
+                              <div className="stage-step" key={stage.id}>
+                                <div className="stage-block">
+                                  <div className="stage-block-head">
+                                    <svg className="stage-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={def.iconPath} />
+                                    </svg>
+                                    <div className="stage-title">
+                                      <span className="stage-name">{def.name}</span>
+                                      <span className="stage-caption">{def.caption}</span>
+                                    </div>
+                                    <div className="stage-controls">
+                                      <button
+                                        type="button"
+                                        className="stage-ctrl-btn"
+                                        title="Move up"
+                                        disabled={stageIndex === 0}
+                                        onClick={() => moveStage(flow.id, stage.id, -1)}
+                                      >
+                                        ↑
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="stage-ctrl-btn"
+                                        title="Move down"
+                                        disabled={stageIndex === stages.length - 1}
+                                        onClick={() => moveStage(flow.id, stage.id, 1)}
+                                      >
+                                        ↓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="stage-ctrl-btn danger"
+                                        title="Remove stage"
+                                        onClick={() => removeStage(flow.id, stage.id)}
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {def.knobs.length > 0 ? (
+                                    <div className="stage-knobs">
+                                      {def.knobs.map((knob) => {
+                                        const value = stage[knob.field] ?? 0
+                                        const maxVal = knob.max ?? (knob.field === 'maxAnswerAttempts' ? 10 : 100)
+                                        
+                                        // Define presets
+                                        let presets: { label: string; value: number }[] = []
+                                        if (knob.field === 'engageRatePercent') {
+                                          presets = [
+                                            { label: '10%', value: 10 },
+                                            { label: '25%', value: 25 },
+                                            { label: '50%', value: 50 },
+                                            { label: '75%', value: 75 },
+                                            { label: '100%', value: 100 },
+                                          ]
+                                        } else if (knob.field === 'judgePassRatePercent') {
+                                          presets = [
+                                            { label: '50% (Hard)', value: 50 },
+                                            { label: '80% (Avg)', value: 80 },
+                                            { label: '90%', value: 90 },
+                                            { label: '95% (Easy)', value: 95 },
+                                            { label: '99%', value: 99 },
+                                          ]
+                                        } else if (knob.field === 'maxAnswerAttempts') {
+                                          presets = [
+                                            { label: '1 (None)', value: 1 },
+                                            { label: '2', value: 2 },
+                                            { label: '3 (Typical)', value: 3 },
+                                            { label: '5', value: 5 },
+                                          ]
+                                        }
+
+                                        return (
+                                          <div className="stage-knob-container" key={knob.field}>
+                                            <div className="stage-knob-label-row">
+                                              <span>{knob.label}</span>
+                                            </div>
+                                            <div className="stage-knob-control-row">
+                                              <input
+                                                type="range"
+                                                className="stage-knob-slider"
+                                                min={knob.min}
+                                                max={maxVal}
+                                                step={knob.step}
+                                                value={value}
+                                                onChange={(event) =>
+                                                  handleStageKnobChange(
+                                                    flow.id,
+                                                    stage.id,
+                                                    knob.field,
+                                                    Number(event.target.value),
+                                                  )
+                                                }
+                                              />
+                                              <span className="stage-knob-number-wrapper">
+                                                <input
+                                                  type="number"
+                                                  min={knob.min}
+                                                  max={maxVal}
+                                                  step={knob.step}
+                                                  value={value}
+                                                  onChange={(event) =>
+                                                    handleStageKnobChange(
+                                                      flow.id,
+                                                      stage.id,
+                                                      knob.field,
+                                                      Number(event.target.value),
+                                                    )
+                                                  }
+                                                />
+                                                {knob.suffix ? (
+                                                  <span className="stage-knob-suffix">{knob.suffix}</span>
+                                                ) : null}
+                                              </span>
+                                            </div>
+
+                                            {presets.length > 0 ? (
+                                              <div className="preset-chips">
+                                                {presets.map((p) => (
+                                                  <button
+                                                    type="button"
+                                                    key={p.label}
+                                                    className={`preset-chip${value === p.value ? ' active' : ''}`}
+                                                    onClick={() =>
+                                                      handleStageKnobChange(
+                                                        flow.id,
+                                                        stage.id,
+                                                        knob.field,
+                                                        p.value,
+                                                      )
+                                                    }
+                                                  >
+                                                    {p.label}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            ) : null}
+
+                                            {knob.field === 'engageRatePercent' ? (
+                                              <div className="knob-math-feedback">
+                                                Downstream volume: Scales following stages to <strong>{value}%</strong> of conversations.
+                                              </div>
+                                            ) : null}
+
+                                            {knob.field === 'judgePassRatePercent' ? (
+                                              <div className="knob-math-feedback">
+                                                Expected runs: <strong>{expectedAttemptsWithCap(
+                                                  clamp(value, 0, 100) / 100,
+                                                  Math.max(1, Math.floor(stage.maxAnswerAttempts || 1))
+                                                ).toFixed(2)}x</strong> drafts & judgements.
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  ) : null}
+
+                                  <div className="stage-fields">
+                                    {def.slots.map((slotDef) => {
+                                      const fieldValue = stage.samples[slotDef.key] ?? ''
+                                      const entryCount = parseSampleTextEntries(fieldValue).length
+                                      const optionalLabel = slotDef.optional ? ' (optional)' : ''
+                                      return (
+                                        <div className="sample-block" key={`${stage.id}-${slotDef.key}`}>
+                                          <label className="textarea-label">
+                                            <span>{slotDef.label}{optionalLabel}</span>
+                                            <span className="badge">{entryCount} parsed</span>
+                                          </label>
+                                          <textarea
+                                            rows={3}
+                                            value={fieldValue}
+                                            onChange={(event) =>
+                                              handleStageSampleChange(
+                                                flow.id,
+                                                stage.id,
+                                                slotDef.key,
+                                                event.target.value,
+                                              )
+                                            }
+                                            placeholder={slotDef.placeholder}
+                                          />
+                                          <div className="file-upload-wrapper">
+                                            <svg className="upload-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                            </svg>
+                                            <input
+                                              type="file"
+                                              accept=".txt,.md,.json,.csv,.log,text/plain,application/json"
+                                              onChange={(event) =>
+                                                void loadFileInto(flow.id, event, (contents) =>
+                                                  handleStageSampleChange(
+                                                    flow.id,
+                                                    stage.id,
+                                                    slotDef.key,
+                                                    contents,
+                                                  ),
+                                                )
+                                              }
+                                            />
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                                {stageIndex < stages.length - 1 ? (
+                                  <div className="stage-arrow" aria-hidden="true">▼</div>
+                                ) : null}
+                              </div>
+                            )
+                          })}
+                        </div>
+
+                        {/* Component palette */}
+                        <div className="stage-palette">
+                          <span className="stage-palette-label">Add stage:</span>
+                          {STAGE_KINDS.map((kind) => (
+                            <button
+                              type="button"
+                              key={kind}
+                              className="stage-palette-btn"
+                              onClick={() => addStage(flow.id, kind)}
+                            >
+                              <svg className="palette-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getStageDef(kind).iconPath} />
+                              </svg>
+                              {getStageDef(kind).name}
+                            </button>
+                          ))}
+                        </div>
 
                         <div className="flow-card-footer">
-                          <span className="muted small font-semibold">{template.description}</span>
+                          <span className="muted small font-semibold">
+                            ≈ {formatTokens(derived.expectedInputTokensPerConversation)} in /{' '}
+                            {formatTokens(derived.expectedOutputTokensPerConversation)} out tokens per conversation
+                          </span>
                           <span className="muted small">
-                            Derived calls: Opening{' '}
-                            <strong>{decimalFormatter.format(flow.expectedOpeningCallsPerConversation)}</strong>{' '}
-                            | Answer{' '}
-                            <strong>{decimalFormatter.format(flow.expectedAnswerCallsPerConversation)}</strong>{' '}
-                            | Judge{' '}
-                            <strong>{decimalFormatter.format(flow.expectedJudgeCallsPerConversation)}</strong>{' '}
-                            | Attempts engaged{' '}
-                            <strong>{decimalFormatter.format(flow.expectedAttemptsWhenEngaged)}</strong>
+                            Calls / conversation{' '}
+                            <strong>{decimalFormatter.format(derived.totalCallsPerConversation)}</strong>{' '}
+                            | Reaching the end{' '}
+                            <strong>{percentFormatter.format(derived.finalReachProbability)}</strong>
                           </span>
                         </div>
                       </div>
@@ -1002,16 +1355,16 @@ function App() {
 
             <div className="add-flow-controls">
               <label>
-                New flow template
+                New flow preset
                 <select
-                  value={newFlowTemplateId}
+                  value={newFlowPresetId}
                   onChange={(event) =>
-                    setNewFlowTemplateId(event.target.value as FlowTemplateId)
+                    setNewFlowPresetId(event.target.value as FlowPresetId)
                   }
                 >
-                  {FLOW_TEMPLATES.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
+                  {FLOW_PRESETS.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.name}
                     </option>
                   ))}
                 </select>

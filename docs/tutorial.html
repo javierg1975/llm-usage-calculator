@@ -383,11 +383,12 @@ annual_cost  =  users
     </ol>
 
     <figure>
-      <img src="img/flow-card.png" alt="A conversation flow card showing the trigger, gate, answer, judge pipeline and its two tabs">
+      <img src="img/flow-card.png" alt="A conversation flow card showing the trigger, gate, answer, judge pipeline as a vertical stack of blocks">
       <figcaption>
-        Each flow is a collapsible card. The <b>Rates &amp; Cadence</b> tab holds the
-        probabilities and frequency; the <b>Token Estimation Samples</b> tab is where your
-        messages turn into token counts (next section).
+        Each flow is a collapsible card laid out as a vertical
+        <b>trigger → gate → answer → judge</b> stack. Every stage block carries its own
+        rate knob <em>and</em> its sample fields inline — no tab-switching — and moving a
+        rate recomputes the estimate live.
       </figcaption>
     </figure>
   </section>
@@ -396,9 +397,11 @@ annual_cost  =  users
   <section id="samples">
     <div class="kicker"><span class="step-num">4</span><h2>From sample messages to tokens</h2></div>
     <p>
-      This is the heart of the tool. Under <b>Token Estimation Samples</b>, each stage of
-      the pipeline has a field. Paste text (one sample per line) or a JSON transcript, or
-      upload a file. The badge on each field shows how many samples were parsed.
+      This is the heart of the tool. Each stage block in the pipeline has its own sample
+      fields. Paste text (one sample per line) or a JSON transcript, or upload a file. The
+      badge on each field shows how many samples were parsed. Prompt fields marked
+      <b>(template only)</b> want the prompt scaffolding without the user message or draft
+      answer pasted in — those are counted separately, so including them double-counts.
     </p>
 
     <figure>
@@ -440,8 +443,10 @@ annual_cost  =  users
     </div>
 
     <p>
-      Press <b>Estimate workflow</b> and the per-conversation input/output token figures
-      update from your samples, ready to roll up into the annual estimate.
+      Press <b>Estimate workflow</b> and the per-conversation token averages update from
+      your samples. From there the rate knobs (engage rate, judge pass rate, max attempts)
+      scale the input/output figures live — move a slider and the annual estimate follows
+      instantly, no re-estimation needed.
     </p>
   </section>
 
@@ -539,9 +544,9 @@ E[attempts]  =  ( 1 − (1 − passRate)^maxAttempts ) / passRate
     <div class="kicker"><span class="step-num">▶</span><h2>Try it yourself</h2></div>
     <ol class="steps">
       <li>Start the app: <code class="kbd">bun run dev</code> (or <code class="kbd">npm run dev</code>), then open the printed URL.</li>
-      <li>Expand a flow → open <b>Token Estimation Samples</b> → load files from the
+      <li>Expand a flow → load files into each stage block from the
         <code class="kbd">samples/</code> folder (see <code class="kbd">samples/README.md</code> for the mapping).</li>
-      <li>Click <b>Estimate workflow</b>, then watch the right-hand panel update.</li>
+      <li>Click <b>Estimate workflow</b>, then drag the rate knobs and watch the right-hand panel update live.</li>
       <li>Swap the model, the distribution, and the user count to see the budget move.</li>
     </ol>
   </section>

@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Azure OpenAI Budget Estimator — Visual Tutorial</title>
+<style>
+  :root {
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --primary: #2563eb;
+    --primary-ink: #1d4ed8;
+    --primary-soft: #eff4ff;
+    --accent: #10b981;
+    --amber-soft: #fff8eb;
+    --amber-line: #fcd9a3;
+    --amber-ink: #92600a;
+    --radius: 18px;
+    --shadow: 0 14px 40px -22px rgba(15, 23, 42, 0.35);
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--ink);
+    background:
+      radial-gradient(1100px 520px at 88% -8%, #e6edff 0%, rgba(230,237,255,0) 60%),
+      radial-gradient(900px 480px at 4% 4%, #e7fbf3 0%, rgba(231,251,243,0) 55%),
+      var(--bg);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 22px 96px; }
+
+  /* Hero */
+  header.hero {
+    text-align: center;
+    padding: 80px 22px 46px;
+    max-width: 920px;
+    margin: 0 auto;
+  }
+  .eyebrow {
+    display: inline-block;
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--primary-ink);
+    background: var(--primary-soft);
+    border: 1px solid #d7e3ff;
+    padding: 6px 14px;
+    border-radius: 999px;
+  }
+  header.hero h1 {
+    font-size: clamp(30px, 5vw, 46px);
+    line-height: 1.1;
+    margin: 20px 0 12px;
+    letter-spacing: -0.02em;
+  }
+  header.hero p.lede {
+    font-size: clamp(16px, 2.3vw, 19px);
+    color: var(--muted);
+    max-width: 660px;
+    margin: 0 auto;
+  }
+  .hero-shot {
+    margin: 38px auto 0;
+    max-width: 900px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    background: var(--card);
+  }
+  .hero-shot img { display: block; width: 100%; }
+
+  /* Section scaffolding */
+  section { margin-top: 64px; }
+  .kicker {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .step-num {
+    flex: none;
+    width: 34px; height: 34px;
+    display: grid; place-items: center;
+    border-radius: 10px;
+    background: var(--primary);
+    color: #fff;
+    font-weight: 700;
+    font-size: 16px;
+    box-shadow: 0 8px 18px -8px rgba(37, 99, 235, 0.7);
+  }
+  h2 { font-size: clamp(22px, 3.2vw, 28px); margin: 0; letter-spacing: -0.01em; }
+  h3 { font-size: 18px; margin: 26px 0 8px; }
+  p { color: #283449; }
+  p.muted { color: var(--muted); }
+  a { color: var(--primary-ink); }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 22px 24px;
+    margin-top: 18px;
+  }
+  figure {
+    margin: 22px 0 0;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    overflow: hidden;
+    background: #fbfcfe;
+    box-shadow: 0 10px 30px -22px rgba(15,23,42,0.4);
+  }
+  figure img { display: block; width: 100%; }
+  figcaption {
+    font-size: 13px;
+    color: var(--muted);
+    padding: 10px 14px;
+    border-top: 1px solid var(--line);
+    background: #fff;
+  }
+  figcaption b { color: var(--ink); }
+
+  /* Pills row */
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 2px; }
+  .pill {
+    font-size: 13px;
+    font-weight: 600;
+    color: #334155;
+    background: #f1f5f9;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 12px;
+  }
+  .pill .dot { color: var(--accent); font-weight: 800; }
+
+  /* Callout */
+  .callout {
+    border: 1px solid var(--amber-line);
+    background: var(--amber-soft);
+    border-radius: 14px;
+    padding: 16px 18px;
+    margin-top: 20px;
+    color: var(--amber-ink);
+  }
+  .callout strong { color: #7a4f06; }
+  .callout.info {
+    border-color: #bcdcff;
+    background: #f1f7ff;
+    color: #1e3a64;
+  }
+  .callout.info strong { color: #163255; }
+
+  /* Math block */
+  .formula {
+    font-family: var(--mono);
+    font-size: 15px;
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin: 16px 0;
+    overflow-x: auto;
+    line-height: 1.7;
+  }
+  .formula .c-key { color: #7dd3fc; }
+  .formula .c-num { color: #fcd34d; }
+  .formula .c-com { color: #64748b; }
+
+  /* Worked example table */
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  thead th {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--muted); background: #f8fafc;
+  }
+  td.num, th.num { text-align: right; font-family: var(--mono); }
+  tr.total td { font-weight: 700; border-top: 2px solid #cbd5e1; border-bottom: none; }
+  .tag {
+    font-family: var(--mono); font-size: 12px;
+    background: var(--primary-soft); color: var(--primary-ink);
+    border-radius: 6px; padding: 2px 7px;
+  }
+
+  /* Two-up */
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 720px){ .two { grid-template-columns: 1fr; } }
+
+  /* Pipeline mini diagram (CSS, no image) */
+  .flow {
+    display: flex; align-items: stretch; gap: 0; flex-wrap: wrap;
+    margin-top: 18px;
+  }
+  .flow .node {
+    flex: 1 1 120px;
+    border: 1.5px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 10px;
+    text-align: center;
+    background: #fff;
+  }
+  .flow .node.lit { border-color: var(--primary); box-shadow: 0 8px 22px -16px rgba(37,99,235,.9); }
+  .flow .node .nm { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .flow .node .vl { font-weight: 700; font-size: 14px; margin-top: 2px; }
+  .flow .arrow { align-self: center; color: #94a3b8; font-size: 22px; padding: 0 8px; }
+  @media (max-width: 620px){
+    .flow { flex-direction: column; }
+    .flow .arrow { transform: rotate(90deg); padding: 4px 0; }
+  }
+
+  /* Steps list */
+  ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 18px 0 0; }
+  ol.steps li {
+    position: relative; padding: 4px 0 18px 44px; margin: 0;
+  }
+  ol.steps li::before {
+    counter-increment: s; content: counter(s);
+    position: absolute; left: 0; top: 2px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--primary-soft); color: var(--primary-ink);
+    border: 1px solid #cfe0ff;
+    display: grid; place-items: center; font-weight: 700; font-size: 14px;
+  }
+  ol.steps li::after {
+    content: ""; position: absolute; left: 13.5px; top: 32px; bottom: 0; width: 1.5px;
+    background: linear-gradient(#cfe0ff, transparent);
+  }
+  ol.steps li:last-child::after { display: none; }
+  ol.steps b { color: var(--ink); }
+
+  code.kbd {
+    font-family: var(--mono); font-size: 13px;
+    background: #eef2f7; border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 6px;
+  }
+
+  footer.foot {
+    margin-top: 72px; padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 14px; text-align: center;
+  }
+  .toc {
+    display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+    margin-top: 30px;
+  }
+  .toc a {
+    text-decoration: none; font-size: 13.5px; font-weight: 600;
+    color: #334155; background: #fff; border: 1px solid var(--line);
+    padding: 7px 13px; border-radius: 999px;
+  }
+  .toc a:hover { border-color: var(--primary); color: var(--primary-ink); }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <span class="eyebrow">Visual Tutorial</span>
+  <h1>Estimate Azure OpenAI spend from your real messages</h1>
+  <p class="lede">
+    This calculator replaces the usual "guess the average tokens per call" with something
+    grounded: paste representative prompts and messages, and it projects annual token
+    usage and dollar cost across your entire user base — live, in the browser.
+  </p>
+  <div class="toc">
+    <a href="#big-picture">The big picture</a>
+    <a href="#step1">1 · Assumptions</a>
+    <a href="#step2">2 · Engagement</a>
+    <a href="#step3">3 · Workflows</a>
+    <a href="#samples">4 · Samples → tokens</a>
+    <a href="#math">The math</a>
+    <a href="#results">Reading results</a>
+  </div>
+  <div class="hero-shot">
+    <img src="img/dashboard.png" alt="The full Azure OpenAI Budget Estimator dashboard">
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- BIG PICTURE -->
+  <section id="big-picture">
+    <div class="kicker"><span class="step-num">◆</span><h2>The big picture</h2></div>
+    <p>
+      A yearly LLM bill is just one multiplication chain. The hard part is that every
+      term in it is usually a guess. The estimator pins down each term with a concrete,
+      inspectable input:
+    </p>
+    <div class="formula">
+<span class="c-com"># annual cost is the product of four grounded quantities</span>
+annual_cost  =  users
+             ×  conversations_per_user_per_year
+             ×  tokens_per_conversation   <span class="c-com">← from YOUR samples</span>
+             ×  price_per_token           <span class="c-com">← Azure Data Zone list price</span>
+             ×  engagement_multiplier     <span class="c-com">← per user-segment weighting</span>
+    </div>
+    <p class="muted">
+      The four numbered sections of the app each nail down one part of that chain. The
+      rest of this tutorial walks them in order.
+    </p>
+  </section>
+
+  <!-- STEP 1 -->
+  <section id="step1">
+    <div class="kicker"><span class="step-num">1</span><h2>Core assumptions</h2></div>
+    <p>
+      Pick the <b>model</b> (each carries its Azure Data Zone input/output price per
+      million tokens) and the number of <b>users per year</b>. These set
+      <code class="kbd">price_per_token</code> and <code class="kbd">users</code>.
+    </p>
+    <div class="pills">
+      <span class="pill">GPT-5.5 → GPT-4o family</span>
+      <span class="pill">o3 / o4-mini reasoning models</span>
+      <span class="pill"><span class="dot">$</span> per-million input &amp; output pricing</span>
+    </div>
+    <div class="callout info">
+      <strong>Prices are list values baked into the app</strong> (<code class="kbd">src/lib/models.ts</code>).
+      Cross-check the live <a href="https://azure.microsoft.com/en-us/pricing/details/azure-openai/" target="_blank" rel="noreferrer">Azure pricing page</a>
+      before quoting a figure to anyone.
+    </div>
+  </section>
+
+  <!-- STEP 2 -->
+  <section id="step2">
+    <div class="kicker"><span class="step-num">2</span><h2>Engagement distribution</h2></div>
+    <p>
+      Real user bases are not uniform: a handful of power users can dwarf everyone else.
+      Instead of one "average user," you choose a <b>distribution</b> that splits your
+      population into segments, each with a <b>share</b> of users and a usage
+      <b>multiplier</b>. The app allocates whole users to each segment and computes a
+      weighted multiplier for the whole base.
+    </p>
+    <figure>
+      <img src="img/distribution.png" alt="Engagement distribution table with segments, shares, multipliers, and users per year">
+      <figcaption>
+        The <b>Mostly quiet users</b> preset: 65% rare users at 0.20× sit alongside a tiny
+        slice of power users — who, despite their small share, drive a large fraction of tokens.
+      </figcaption>
+    </figure>
+    <p class="muted">
+      Four presets ship in <code class="kbd">src/lib/distributions.ts</code>
+      (mostly-quiet, balanced, power-user-heavy, chatty long-tail). Shares always sum to
+      100%, and users are allocated with a largest-remainder method so the segment counts
+      stay integer-exact.
+    </p>
+  </section>
+
+  <!-- STEP 3 -->
+  <section id="step3">
+    <div class="kicker"><span class="step-num">3</span><h2>Conversation workflows</h2></div>
+    <p>
+      A conversation is rarely a single API call. The app models it as a pipeline with a
+      gate and a retry loop — the part that makes token counts realistic:
+    </p>
+
+    <div class="flow">
+      <div class="node lit"><div class="nm">Trigger</div><div class="vl">User message</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="nm">Gate</div><div class="vl">engage?</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="nm">Answer</div><div class="vl">draft reply</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="nm">Judge</div><div class="vl">pass / retry</div></div>
+    </div>
+
+    <ol class="steps">
+      <li><b>Trigger</b> — a user message arrives (or, for an <i>assistant-first</i> flow, the
+        model generates an opening message first).</li>
+      <li><b>Gate</b> — a cheap classifier decides whether to engage at all
+        (<code class="kbd">engageRate</code>). Out-of-scope messages stop here.</li>
+      <li><b>Answer</b> — the model drafts a reply.</li>
+      <li><b>Judge</b> — an LLM-as-judge grades it. On a fail, the answer→judge loop repeats
+        up to <code class="kbd">maxAnswerAttempts</code> times.</li>
+    </ol>
+
+    <figure>
+      <img src="img/flow-card.png" alt="A conversation flow card showing the trigger, gate, answer, judge pipeline and its two tabs">
+      <figcaption>
+        Each flow is a collapsible card. The <b>Rates &amp; Cadence</b> tab holds the
+        probabilities and frequency; the <b>Token Estimation Samples</b> tab is where your
+        messages turn into token counts (next section).
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- SAMPLES -->
+  <section id="samples">
+    <div class="kicker"><span class="step-num">4</span><h2>From sample messages to tokens</h2></div>
+    <p>
+      This is the heart of the tool. Under <b>Token Estimation Samples</b>, each stage of
+      the pipeline has a field. Paste text (one sample per line) or a JSON transcript, or
+      upload a file. The badge on each field shows how many samples were parsed.
+    </p>
+
+    <figure>
+      <img src="img/samples-grid.png" alt="Sample input fields with parsed-count badges for each pipeline stage">
+      <figcaption>
+        Loaded from the demo <b>samples/</b> directory: user messages, the evaluation
+        (gate) prompt, gate decisions, and so on. The <span class="tag">N parsed</span>
+        badge confirms how many samples each field contributed.
+      </figcaption>
+    </figure>
+
+    <h3>How parsing works</h3>
+    <div class="two">
+      <div class="card">
+        <h3 style="margin-top:0">Plain text</h3>
+        <p class="muted" style="margin:0">
+          Split into one sample per non-empty line. Blank and whitespace-only lines are
+          dropped before counting.
+        </p>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">JSON transcripts</h3>
+        <p class="muted" style="margin:0">
+          Arrays/objects are flattened by pulling text from known keys
+          (<code class="kbd">content</code>, <code class="kbd">text</code>,
+          <code class="kbd">prompt</code>, …). Envelope fields like
+          <code class="kbd">role</code> and <code class="kbd">id</code> are ignored, so
+          structure never inflates the token count.
+        </p>
+      </div>
+    </div>
+
+    <div class="callout info">
+      <strong>Real tokenizer, not an estimate.</strong> Tokens are counted with
+      <code class="kbd">js-tiktoken</code> using the <code class="kbd">o200k_base</code>
+      encoding — the exact tokenizer used by OpenAI's GPT-4o → GPT-5 and o-series models.
+      The app averages tokens across your samples per stage, then hands those averages to
+      the workflow model.
+    </div>
+
+    <p>
+      Press <b>Estimate workflow</b> and the per-conversation input/output token figures
+      update from your samples, ready to roll up into the annual estimate.
+    </p>
+  </section>
+
+  <!-- MATH -->
+  <section id="math">
+    <div class="kicker"><span class="step-num">∑</span><h2>The math, worked end to end</h2></div>
+    <p>
+      Because the answer→judge loop retries, "calls per conversation" is not a whole
+      number. The expected number of answer attempts when engaged follows a
+      <b>truncated geometric</b> expectation:
+    </p>
+    <div class="formula">
+E[attempts]  =  ( 1 − (1 − passRate)^maxAttempts ) / passRate
+
+<span class="c-com"># e.g. passRate = </span><span class="c-num">0.5</span><span class="c-com">, maxAttempts = </span><span class="c-num">3</span>
+           =  ( 1 − 0.5³ ) / 0.5  =  <span class="c-num">1.75</span>  attempts
+    </div>
+
+    <p>
+      Here is a fully worked, hand-checkable example. Assume these per-sample token
+      averages and rates (small numbers chosen so you can follow along):
+    </p>
+
+    <div class="pills">
+      <span class="pill">engageRate = 0.5</span>
+      <span class="pill">passRate = 0.5</span>
+      <span class="pill">maxAttempts = 3</span>
+      <span class="pill">→ answer &amp; judge calls = 0.5 × 1.75 = 0.875</span>
+    </div>
+
+    <h3>Expected <span style="color:var(--primary-ink)">input</span> tokens per conversation</h3>
+    <table>
+      <thead>
+        <tr><th>Stage</th><th class="num">calls</th><th>input tokens each</th><th class="num">contribution</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Gate (evaluation)</td><td class="num">1</td><td>user 3 + prompt 5 = 8</td><td class="num">8.000</td></tr>
+        <tr><td>Answer</td><td class="num">0.875</td><td>user 3 + prompt 3 = 6</td><td class="num">5.250</td></tr>
+        <tr><td>Judge</td><td class="num">0.875</td><td>prompt 9 + user 3 + draft 9 = 21</td><td class="num">18.375</td></tr>
+        <tr class="total"><td>Total input</td><td class="num"></td><td></td><td class="num">31.625</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Expected <span style="color:var(--accent)">output</span> tokens per conversation</h3>
+    <table>
+      <thead>
+        <tr><th>Stage</th><th class="num">calls</th><th>output tokens each</th><th class="num">contribution</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Gate decision</td><td class="num">1</td><td>1</td><td class="num">1.000</td></tr>
+        <tr><td>Answer (draft)</td><td class="num">0.875</td><td>9</td><td class="num">7.875</td></tr>
+        <tr><td>Judge decision</td><td class="num">0.875</td><td>1</td><td class="num">0.875</td></tr>
+        <tr class="total"><td>Total output</td><td class="num"></td><td></td><td class="num">9.750</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <strong>Modeling assumption — input is an upper bound.</strong> The shared user
+      message is counted as fresh input on <em>every</em> answer and judge call.
+      Cached-input pricing is intentionally excluded, so real input cost can come in lower.
+    </div>
+
+    <p class="muted">
+      These exact numbers are asserted in
+      <code class="kbd">src/lib/messageTokenCalculation.test.ts</code> against the real
+      tokenizer — the tutorial and the test agree by construction.
+    </p>
+  </section>
+
+  <!-- RESULTS -->
+  <section id="results">
+    <div class="kicker"><span class="step-num">5</span><h2>Reading the live estimate</h2></div>
+    <p>
+      The right-hand panel updates on every keystroke. Per-conversation tokens are
+      multiplied by conversations-per-user, by users, and by each segment's engagement
+      multiplier, then priced — giving annual input, output, and total cost plus a
+      per-segment breakdown.
+    </p>
+    <figure>
+      <img src="img/results-sidebar.png" alt="Live annual estimates panel showing input, output, and total cost with token counts">
+      <figcaption>
+        Headline <b>input</b>, <b>output</b>, and <b>total</b> cost, each with its token
+        count, and a bar showing the input/output split. A segment table and leadership
+        summary sit just below.
+      </figcaption>
+    </figure>
+    <div class="callout info">
+      <strong>Everything is live and local.</strong> There is no backend and no network
+      call — change a price, a rate, or a sample and the whole chain recomputes instantly
+      in your browser.
+    </div>
+  </section>
+
+  <section id="try">
+    <div class="kicker"><span class="step-num">▶</span><h2>Try it yourself</h2></div>
+    <ol class="steps">
+      <li>Start the app: <code class="kbd">bun run dev</code> (or <code class="kbd">npm run dev</code>), then open the printed URL.</li>
+      <li>Expand a flow → open <b>Token Estimation Samples</b> → load files from the
+        <code class="kbd">samples/</code> folder (see <code class="kbd">samples/README.md</code> for the mapping).</li>
+      <li>Click <b>Estimate workflow</b>, then watch the right-hand panel update.</li>
+      <li>Swap the model, the distribution, and the user count to see the budget move.</li>
+    </ol>
+  </section>
+
+  <footer class="foot">
+    Azure OpenAI Budget Estimator · tokens counted with js-tiktoken
+    (<code class="kbd" style="font-size:12px">o200k_base</code>) · figures are estimates,
+    not quotes. See the project <a href="../README.md">README</a> for details.
+  </footer>
+
+</div>
+</body>
+</html>

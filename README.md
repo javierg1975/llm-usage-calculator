@@ -10,8 +10,9 @@ cost across a whole user base.
   <img src="docs/img/dashboard.png" alt="Azure OpenAI Budget Estimator dashboard" width="900">
 </p>
 
-> **New here?** Open the visual walkthrough: [`docs/tutorial.html`](docs/tutorial.html)
-> (open it directly in a browser).
+> **New here?** Open the visual walkthrough:
+> [tutorial](https://htmlpreview.github.io/?https://github.com/javierg1975/llm-usage-calculator/blob/develop/docs/tutorial.html)
+> (rendered via htmlpreview.github.io — or open [`docs/tutorial.html`](docs/tutorial.html) locally in a browser).
 
 ---
 

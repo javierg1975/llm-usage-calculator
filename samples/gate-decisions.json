@@ -1,0 +1,6 @@
+[
+  { "engage": true, "reason": "billing question, in scope" },
+  { "engage": true, "reason": "account data export, in scope" },
+  { "engage": true, "reason": "product troubleshooting, in scope" },
+  { "engage": false, "reason": "needs human account manager" }
+]

@@ -1,0 +1,8 @@
+[
+  { "role": "user", "content": "Hi, my invoice last month looks higher than usual. Can you explain the charges?" },
+  { "role": "user", "content": "How do I export all of my account data to a CSV file?" },
+  { "role": "user", "content": "The mobile app keeps logging me out every few minutes. What should I do?" },
+  { "role": "user", "content": "Can I upgrade from the Team plan to Enterprise without losing my existing settings?" },
+  { "role": "user", "content": "I was charged twice for the same order #48213. Please help me get a refund." },
+  { "role": "user", "content": "Does your service support single sign-on with Okta and Azure AD?" }
+]

@@ -1,0 +1,5 @@
+[
+  { "pass": true, "scores": { "correctness": 0.95, "policy": 1, "helpfulness": 0.9 }, "feedback": "Accurate and within policy." },
+  { "pass": true, "scores": { "correctness": 0.9, "policy": 1, "helpfulness": 0.85 }, "feedback": "Clear step-by-step guidance." },
+  { "pass": false, "scores": { "correctness": 0.6, "policy": 0.8, "helpfulness": 0.7 }, "feedback": "Promised a refund timeline that is not guaranteed; revise." }
+]

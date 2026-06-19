@@ -1,0 +1,3 @@
+Welcome aboard! Your Team workspace is ready — the fastest win is inviting two teammates from Settings > Members so you can try shared projects today. Reply here anytime and I'll help you get set up.
+Hi, and thanks for choosing us! Since you're on the Pro plan, I'd start by connecting your first data source under Integrations — it unlocks the dashboards most people love. Just reply if you'd like a hand with anything.
+Great to have you here! A quick first step is enabling single sign-on under Security so your whole team can log in seamlessly. Let me know what you're hoping to accomplish and I'll point you the right way.

@@ -352,43 +352,61 @@ annual_cost  =  users
       100%, and users are allocated with a largest-remainder method so the segment counts
       stay integer-exact.
     </p>
+    <div class="callout info">
+      <strong>Each preset is a selectable card with a mini histogram.</strong> In every bar,
+      <b>width = share of users</b> and <b>height = engagement multiplier</b> (√-scaled so a
+      25× outlier doesn't flatten the rest). Because width × height = area, each bar's area ≈
+      that segment's <b>share of tokens</b> — so the skinny-but-tall power-user spike visually
+      <em>is</em> its outsized cost. A dashed 1× line marks average engagement.
+    </div>
   </section>
 
   <!-- STEP 3 -->
   <section id="step3">
     <div class="kicker"><span class="step-num">3</span><h2>Conversation workflows</h2></div>
     <p>
-      A conversation is rarely a single API call. The app models it as a pipeline with a
-      gate and a retry loop — the part that makes token counts realistic:
+      A conversation is rarely a single API call. You <b>compose</b> each flow from stages in
+      a visual designer — add, remove, and reorder them — so the token count matches how your
+      pipeline actually runs. Four stage types are available:
     </p>
 
     <div class="flow">
-      <div class="node lit"><div class="nm">Trigger</div><div class="vl">User message</div></div>
+      <div class="node"><div class="nm">Opening</div><div class="vl">first message</div></div>
       <div class="arrow">→</div>
       <div class="node"><div class="nm">Gate</div><div class="vl">engage?</div></div>
       <div class="arrow">→</div>
-      <div class="node"><div class="nm">Answer</div><div class="vl">draft reply</div></div>
+      <div class="node lit"><div class="nm">Answer → Judge</div><div class="vl">draft + retry</div></div>
       <div class="arrow">→</div>
-      <div class="node"><div class="nm">Judge</div><div class="vl">pass / retry</div></div>
+      <div class="node"><div class="nm">LLM call</div><div class="vl">generic</div></div>
     </div>
 
     <ol class="steps">
-      <li><b>Trigger</b> — a user message arrives (or, for an <i>assistant-first</i> flow, the
-        model generates an opening message first).</li>
-      <li><b>Gate</b> — a cheap classifier decides whether to engage at all
-        (<code class="kbd">engageRate</code>). Out-of-scope messages stop here.</li>
-      <li><b>Answer</b> — the model drafts a reply.</li>
-      <li><b>Judge</b> — an LLM-as-judge grades it. On a fail, the answer→judge loop repeats
-        up to <code class="kbd">maxAnswerAttempts</code> times.</li>
+      <li><b>Opening</b> — the assistant sends the first message (assistant-first flows).</li>
+      <li><b>Gate</b> — a cheap classifier decides whether to engage
+        (<code class="kbd">engageRate</code>). It's the only stage that <b>branches</b>:
+        everything after it is scaled to that fraction of conversations.</li>
+      <li><b>Answer → Judge</b> — one coupled stage. The model drafts a reply, an
+        LLM-as-judge grades it, and on a fail the loop repeats up to
+        <code class="kbd">maxAnswerAttempts</code> times.</li>
+      <li><b>LLM call</b> — a generic single call (prompt → response) for any ad-hoc step.</li>
     </ol>
 
+    <p>
+      The <b>shared user message</b> is a flow-level input every gate / answer / judge call
+      sees, counted once and reused. Two <b>presets</b> seed a default stage list —
+      <i>user-first</i> = <code class="kbd">[gate, answer→judge]</code> and
+      <i>assistant-first</i> = <code class="kbd">[opening, gate, answer→judge]</code> — and
+      the moment you hand-edit the stages the preset flips to <b>Custom</b>.
+    </p>
+
     <figure>
-      <img src="img/flow-card.png" alt="A conversation flow card showing the trigger, gate, answer, judge pipeline as a vertical stack of blocks">
+      <img src="img/flow-card.png" alt="A conversation flow card: a preset picker with a live pipeline preview above a vertical, editable stack of stage blocks">
       <figcaption>
-        Each flow is a collapsible card laid out as a vertical
-        <b>trigger → gate → answer → judge</b> stack. Every stage block carries its own
-        rate knob <em>and</em> its sample fields inline — no tab-switching — and moving a
-        rate recomputes the estimate live.
+        Each flow is a collapsible card: a preset picker with a live pipeline mini-map on top,
+        then the shared user message, then a vertical stack of editable stage blocks. Every
+        block carries its own rate knobs <em>and</em> sample fields inline, with ↑/↓/✕ controls
+        to reorder or remove it and a palette to add more. Moving a rate recomputes the
+        estimate live.
       </figcaption>
     </figure>
   </section>
@@ -466,14 +484,18 @@ E[attempts]  =  ( 1 − (1 − passRate)^maxAttempts ) / passRate
     </div>
 
     <p>
-      Here is a fully worked, hand-checkable example. Assume these per-sample token
-      averages and rates (small numbers chosen so you can follow along):
+      Here is a fully worked, hand-checkable example for the <b>user-first</b> preset — a
+      <code class="kbd">[gate, answer→judge]</code> stage list. The engine folds over the
+      stages tracking a <b>reach probability</b>: the gate runs once at reach 1, then scales
+      the reach to <code class="kbd">engageRate</code> for everything downstream. Assume these
+      per-sample token averages and rates (small numbers chosen so you can follow along):
     </p>
 
     <div class="pills">
       <span class="pill">engageRate = 0.5</span>
       <span class="pill">passRate = 0.5</span>
       <span class="pill">maxAttempts = 3</span>
+      <span class="pill">→ reach after gate = 0.5</span>
       <span class="pill">→ answer &amp; judge calls = 0.5 × 1.75 = 0.875</span>
     </div>
 
@@ -505,14 +527,23 @@ E[attempts]  =  ( 1 − (1 − passRate)^maxAttempts ) / passRate
 
     <div class="callout">
       <strong>Modeling assumption — input is an upper bound.</strong> The shared user
-      message is counted as fresh input on <em>every</em> answer and judge call.
+      message is counted as fresh input on <em>every</em> gate, answer, and judge call.
       Cached-input pricing is intentionally excluded, so real input cost can come in lower.
     </div>
 
+    <div class="callout info">
+      <strong>One more multiplier — API reliability.</strong> A global factor accounts for
+      transport-level call failures (timeouts, 5xx, rate limits) that get retried. It's the
+      same truncated-geometric overhead, applied to the <b>input</b> total only (a failed call
+      rarely bills for output). The default — 99% success / 3 attempts ≈ <b>1.01×</b> — is a
+      rounding-error nudge; set success to 100% to switch it off.
+    </div>
+
     <p class="muted">
-      These exact numbers are asserted in
-      <code class="kbd">src/lib/messageTokenCalculation.test.ts</code> against the real
-      tokenizer — the tutorial and the test agree by construction.
+      The stage fold lives in <code class="kbd">combineFlowStages</code>
+      (<code class="kbd">src/lib/conversationWorkflow.ts</code>) and is covered by unit tests,
+      including equivalence tests proving the two presets reproduce the original
+      fixed-pipeline numbers exactly.
     </p>
   </section>
 

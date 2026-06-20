@@ -6,10 +6,6 @@ you paste representative messages, the app tokenizes them with the same encoder 
 models use, and a probabilistic workflow model projects yearly input/output tokens and
 cost across a whole user base.
 
-<p align="center">
-  <img src="docs/img/dashboard.png" alt="Azure OpenAI Budget Estimator dashboard" width="900">
-</p>
-
 > **New here?** Open the visual walkthrough:
 > [tutorial](https://htmlpreview.github.io/?https://github.com/javierg1975/llm-usage-calculator/blob/develop/docs/tutorial.html)
 > (rendered via htmlpreview.github.io — or open [`docs/tutorial.html`](docs/tutorial.html) locally in a browser).

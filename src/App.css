@@ -257,6 +257,75 @@ button:disabled {
   font-weight: 700;
 }
 
+/* Engagement distribution cards + sparkline */
+.distribution-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.distribution-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  padding: 0.75rem 0.85rem;
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.distribution-card:hover {
+  border-color: var(--primary);
+}
+
+.distribution-card.selected {
+  border-color: var(--primary-strong);
+  background: var(--primary-soft);
+  box-shadow: 0 0 0 1px var(--primary-strong);
+}
+
+.distribution-card-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.dist-spark {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+.dist-spark-bar {
+  fill: var(--primary);
+}
+
+.distribution-card.selected .dist-spark-bar {
+  fill: var(--primary-strong);
+}
+
+.dist-spark-baseline {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+}
+
+.dist-spark-baseline-label {
+  fill: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  text-anchor: end;
+}
+
+.dist-legend {
+  margin-top: -0.25rem;
+}
+
 /* Workloads List & Accordion Items */
 .workloads {
   display: flex;

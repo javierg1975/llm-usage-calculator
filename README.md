@@ -6,9 +6,8 @@ you paste representative messages, the app tokenizes them with the same encoder 
 models use, and a probabilistic workflow model projects yearly input/output tokens and
 cost across a whole user base.
 
-> **New here?** Open the visual walkthrough:
-> [tutorial](https://htmlpreview.github.io/?https://github.com/javierg1975/llm-usage-calculator/blob/develop/docs/tutorial.html)
-> (rendered via htmlpreview.github.io — or open [`docs/tutorial.html`](docs/tutorial.html) locally in a browser).
+> **New here?** Open the [visual walkthrough:](https://htmlpreview.github.io/?https://github.com/javierg1975/llm-usage-calculator/blob/develop/docs/tutorial.html)
+>  — or open [`docs/tutorial.html`](docs/tutorial.html) locally in a browser.
 
 ---
 

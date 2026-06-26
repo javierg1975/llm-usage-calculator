@@ -13,9 +13,9 @@ cost across a whole user base.
 
 ## Why this exists
 
-Most cost estimates start from a made-up "average tokens per call." That number is
-almost always wrong, and the error compounds when you multiply by millions of
-conversations. This tool replaces the guess with three grounded inputs:
+Most cost estimates start from a guessed "average tokens per call." That number is
+usually wrong, and the error compounds when you multiply by millions of conversations.
+This tool replaces the guess with three measured inputs:
 
 1. **What your traffic actually looks like** — paste sample messages and prompts.
 2. **How a conversation actually runs** — compose the flow from stages (opening, gate,
@@ -28,6 +28,21 @@ It then multiplies these out to an annual token and dollar figure, broken down b
 segment, updating live as you type.
 
 ---
+
+## Prerequisites
+
+This project was built and tested with [**bun**](https://bun.sh/), and only `bun.lock`
+is committed. Use bun if you can:
+
+- **bun** (recommended) — install from [bun.sh](https://bun.sh/) (e.g.
+  `curl -fsSL https://bun.sh/install | bash`). It bundles its own runtime, so that's the
+  only thing you need.
+- **Node.js + npm** — install [Node.js](https://nodejs.org/) 18+ (npm ships with it).
+  Untested: there's no `package-lock.json`, so npm resolves dependencies fresh from
+  `package.json` and may pull different versions than bun pinned. It will probably work,
+  but bun is the known-good path.
+
+If you have neither, start with bun.
 
 ## Quick start
 
@@ -73,9 +88,9 @@ The calculation runs in three layers, each isolated in `src/lib/` and unit-teste
 ### 1. Tokenization — `tokenization.ts`
 
 Counts tokens with [`js-tiktoken`](https://github.com/dqbd/tiktoken) using the
-**`o200k_base`** encoding — the exact tokenizer used by the GPT-4o → GPT-5 generation of
-OpenAI models (and the `o1`/`o3`/`o4` reasoning models). This is a real, battle-tested
-tokenizer, not an approximation.
+**`o200k_base`** encoding — the tokenizer used by the GPT-4o → GPT-5 generation of
+OpenAI models (and the `o1`/`o3`/`o4` reasoning models). It runs the same encoder the
+models use, so counts are exact rather than estimated.
 
 ### 2. Sample parsing & token math — `sampleText.ts`
 
@@ -119,7 +134,7 @@ chance a conversation gets this far) and accumulating tokens and call counts:
   (timeouts, 5xx, rate limits) that are transparently retried. Modeled as a
   truncated-geometric overhead `(1 − (1 − successRate)^maxAttempts) / successRate` and
   applied to **input tokens only** — a failed call rarely bills for output. The default
-  (99% success / 3 attempts ≈ 1.01×) is a rounding-error nudge; raise it for flaky infra,
+  (99% success / 3 attempts ≈ 1.01×) barely moves the total; raise it for flaky infra,
   or set success to 100% to disable.
 - `calculator.ts` then scales per-user tokens across an **engagement distribution**
   (light/standard/heavy/power users with per-segment multipliers and largest-remainder
@@ -130,7 +145,7 @@ chance a conversation gets this far) and accumulating tokens and call counts:
   <img src="docs/img/pipeline.png" alt="trigger → gate → answer → judge pipeline" width="760">
 </p>
 
-### Modeling assumptions (read before trusting the number)
+### Modeling assumptions (read these before relying on the number)
 
 - **Cached-input pricing is excluded.** The shared user message is counted as fresh input
   on every answer and judge call, so input tokens are an **upper bound** — real spend can
